@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { collection, query, where, onSnapshot, limit, orderBy } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 
@@ -40,127 +39,49 @@ export default function GlobalNotifications() {
   useEffect(() => {
     if (!user || !profile) return;
 
-    // 1. Listen for new Bookings
-    const bookingsRef = collection(db, 'bookings');
-    let bookingsQuery;
-    
-    // Only 'isListAdmin' can query all bookings. 
-    // Regular owners MUST filter by facilityOwnerId.
-    const isSuperAdmin = profile.email === 'miguel@builtbymiguel.net';
-
-    if (profile.role === 'ADMIN' && isSuperAdmin) {
-      bookingsQuery = query(
-        bookingsRef,
-        orderBy('createdAt', 'desc'),
-        limit(1)
-      );
-    } else if (profile.role === 'OWNER' || profile.role === 'ADMIN') {
-      bookingsQuery = query(
-        bookingsRef,
-        where('facilityOwnerId', '==', user.uid),
-        orderBy('createdAt', 'desc'),
-        limit(1)
-      );
-    } else {
-      bookingsQuery = query(
-        bookingsRef,
-        where('userId', '==', user.uid),
-        orderBy('createdAt', 'desc'),
-        limit(1)
-      );
-    }
-
-    const unsubBookings = onSnapshot(bookingsQuery, (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added') {
-          const booking = change.doc.data();
-          if (lastBookingId.current && change.doc.id !== lastBookingId.current) {
-            toast.info(`New Booking: ${booking.facilityName}`, {
-              description: `A new activity has been recorded.`,
-            });
-            playChime();
-          }
-          lastBookingId.current = change.doc.id;
-        }
-      });
-    }, (err) => {
-      handleFirestoreError(err, OperationType.GET, 'bookings', false);
-    });
-
-    // 2. Listen for new Messages
-    const roomsRef = collection(db, 'chats');
-    const roomsQuery = isSuperAdmin 
-      ? query(roomsRef, limit(20))
-      : query(
-          roomsRef,
-          where(profile.role === 'OWNER' ? 'facilityOwnerId' : 'playerId', '==', user.uid)
-        );
-
-    const unsubMessages = onSnapshot(roomsQuery, (snapshot) => {
-      snapshot.docs.forEach(roomDoc => {
-        const messagesRef = collection(db, 'chats', roomDoc.id, 'messages');
-        const msgQuery = query(messagesRef, orderBy('timestamp', 'desc'), limit(1));
+    // Listen for new bookings
+    const bookingsChannel = supabase.channel('global-bookings')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bookings' }, (payload) => {
+        const booking = payload.new;
+        const isSuperAdmin = profile.email === 'miguel@builtbymiguel.net';
         
-        onSnapshot(msgQuery, (msgSnap) => {
-          msgSnap.docChanges().forEach((change) => {
-            if (change.type === 'added') {
-              const msg = change.doc.data();
-              if (msg.senderId !== user.uid) {
-                if (lastMessageId.current && change.doc.id !== lastMessageId.current) {
-                  toast.success(`New Message`, {
-                    description: msg.text?.substring(0, 50) + (msg.text?.length > 50 ? '...' : ''),
-                  });
-                  playChime();
-                }
-                lastMessageId.current = change.doc.id;
-              }
-            }
-          });
-        }, (err) => {
-          handleFirestoreError(err, OperationType.GET, 'chat_messages', false);
-        });
-      });
-    }, (err) => {
-      handleFirestoreError(err, OperationType.GET, 'chats', false);
-    });
-
-    // 3. Listen for new Reviews
-    const reviewsRef = collection(db, 'reviews');
-    let reviewsQuery;
-    if (profile.role === 'OWNER' || profile.role === 'ADMIN') {
-      reviewsQuery = isSuperAdmin 
-        ? query(reviewsRef, orderBy('createdAt', 'desc'), limit(1))
-        : query(reviewsRef, where('facilityOwnerId', '==', user.uid), orderBy('createdAt', 'desc'), limit(1));
-
-      const unsubReviews = onSnapshot(reviewsQuery, (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') {
-            const review = change.doc.data();
-            if (lastReviewId.current && change.doc.id !== lastReviewId.current) {
-              toast.info(`New Review Received`, {
-                description: `${review.rating} Stars for ${review.facilityName}`,
-              });
-              playChime();
-            }
-            lastReviewId.current = change.doc.id;
-          }
-        });
-      }, (err) => {
-        if (err.code === 'permission-denied') {
-          console.warn('Review listener permission denied.');
+        // Filter logic
+        let shouldShow = false;
+        if (isSuperAdmin || profile.role === 'ADMIN') {
+          shouldShow = true;
+        } else if (profile.role === 'OWNER') {
+          shouldShow = (booking as any).facility_owner_id === user.id;
+        } else {
+          shouldShow = (booking as any).user_id === user.id;
         }
-      });
 
-      return () => {
-        unsubBookings();
-        unsubMessages();
-        unsubReviews();
-      };
-    }
+        if (shouldShow && lastBookingId.current !== payload.new.id) {
+          toast.info(`New Activity Detected`, {
+            description: `A new record has been added to the matrix.`,
+          });
+          playChime();
+          lastBookingId.current = payload.new.id;
+        }
+      })
+      .subscribe();
+
+    // Listen for new messages
+    const messagesChannel = supabase.channel('global-messages')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        const msg = payload.new;
+        if ((msg as any).sender_id !== user.id && lastMessageId.current !== msg.id) {
+          toast.success(`Incoming Message`, {
+            description: (msg as any).text?.substring(0, 50) + ((msg as any).text?.length > 50 ? '...' : ''),
+          });
+          playChime();
+          lastMessageId.current = msg.id;
+        }
+      })
+      .subscribe();
 
     return () => {
-      unsubBookings();
-      unsubMessages();
+      supabase.removeChannel(bookingsChannel);
+      supabase.removeChannel(messagesChannel);
     };
   }, [user, profile]);
 
