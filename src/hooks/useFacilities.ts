@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { Facility } from '../types';
 
 export function useFacilities(userId: string | undefined) {
@@ -15,22 +14,41 @@ export function useFacilities(userId: string | undefined) {
       return;
     }
 
-    const q = query(collection(db, 'facilities'), where('ownerId', '==', userId));
-    
-    const unsubscribe = onSnapshot(q, 
-      (snapshot) => {
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Facility));
-        setFacilities(data);
-        setLoading(false);
-      },
-      (err) => {
-        setError(err as Error);
-        setLoading(false);
-        handleFirestoreError(err, OperationType.LIST, 'facilities');
-      }
-    );
+    const fetchFacilities = async () => {
+      const { data, error: fetchError } = await supabase
+        .from('facilities')
+        .select('*')
+        .eq('owner_id', userId);
 
-    return () => unsubscribe();
+      if (fetchError) {
+        setError(fetchError as any);
+      } else {
+        setFacilities(data as Facility[]);
+      }
+      setLoading(false);
+    };
+
+    fetchFacilities();
+
+    const channel = supabase
+      .channel(`facilities-${userId}`)
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'facilities', filter: `owner_id=eq.${userId}` }, 
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setFacilities(prev => [...prev, payload.new as Facility]);
+          } else if (payload.eventType === 'UPDATE') {
+            setFacilities(prev => prev.map(f => f.id === payload.new.id ? payload.new as Facility : f));
+          } else if (payload.eventType === 'DELETE') {
+            setFacilities(prev => prev.filter(f => f.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [userId]);
 
   return { facilities, loading, error };

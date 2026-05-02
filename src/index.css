@@ -5,20 +5,20 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", sans-serif;
   
-  --color-lime: var(--brand, #B5F55A);
+  --color-lime: #CCFF00;
   --color-cyan: var(--brand-admin, #00FFFF);
-  --color-charcoal: #09090B;
-  --color-charcoal-light: #18181B;
+  --color-charcoal: #0A0A0A;
+  --color-charcoal-light: #1A1A1A;
 }
 
 :root {
-  --brand: #B5F55A;
+  --brand: #CCFF00;
   --brand-admin: #00FFFF;
 }
 
 @layer base {
   html, body {
-    @apply bg-charcoal text-white font-sans antialiased selection:bg-lime selection:text-black overflow-x-hidden;
+    @apply bg-[#0A0A0A] text-white font-sans antialiased selection:bg-[#CCFF00] selection:text-black overflow-x-hidden;
   }
 }
 

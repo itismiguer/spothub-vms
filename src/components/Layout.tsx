@@ -1,8 +1,7 @@
 import React from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { Calendar, User, LayoutDashboard, Settings, LogIn, LogOut, Search, Activity, MessageSquare, ShieldAlert, ChevronDown, Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Selector from './Selector';
@@ -22,71 +21,79 @@ export default function Layout() {
     if (!user) return;
 
     // Listen for unread notifications
-    const notificationsRef = collection(db, 'notifications');
-    const notificationsQ = query(
-      notificationsRef,
-      where('userId', '==', user.uid),
-      where('read', '==', false),
-      limit(1)
-    );
+    const fetchUnreadNotifications = async () => {
+      const { count } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('read', false);
+      setHasUnreadNotifications((count || 0) > 0);
+    };
 
-    const unsubNotifications = onSnapshot(notificationsQ, (snap) => {
-      setHasUnreadNotifications(!snap.empty);
-    }, (err) => {
-      handleFirestoreError(err, OperationType.GET, 'notifications', false);
-    });
+    fetchUnreadNotifications();
+
+    const notificationsChannel = supabase.channel('unread-notifications')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => {
+        fetchUnreadNotifications();
+      })
+      .subscribe();
 
     // Listen for unread messages
-    const roomsRef = collection(db, 'chats');
-    const isSuperAdmin = profile?.email === 'miguel@builtbymiguel.net';
-    
-    // Players match on playerId, Owners match on facilityOwnerId
-    const roomsQ = isSuperAdmin 
-      ? query(roomsRef, limit(20))
-      : query(
-          roomsRef, 
-          where(profile?.role === 'OWNER' ? 'facilityOwnerId' : 'playerId', '==', user.uid)
-        );
-    
-    const unsubMessages = onSnapshot(roomsQ, (snapshot) => {
-      const unread = snapshot.docs.some(doc => {
-        const data = doc.data();
-        const field = profile?.role === 'OWNER' ? 'unreadCountOwner' : 'unreadCountPlayer';
-        return (data[field] || 0) > 0;
-      });
+    const fetchUnreadMessages = async () => {
+      const field = profile?.role === 'OWNER' ? 'unread_count_owner' : 'unread_count_player';
+      const userField = profile?.role === 'OWNER' ? 'facility_owner_id' : 'player_id';
+      
+      const { data } = await supabase
+        .from('chats')
+        .select(field)
+        .eq(userField, user.id);
+      
+      const unread = data?.some(d => (d as any)[field] > 0) || false;
       setHasUnreadMessages(unread);
-    }, (err) => {
-      handleFirestoreError(err, OperationType.GET, 'chats', false);
-    });
+    };
+
+    fetchUnreadMessages();
+
+    const chatsChannel = supabase.channel('unread-messages')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats' }, () => {
+        fetchUnreadMessages();
+      })
+      .subscribe();
 
     // Listen for pending bookings for owners
-    let unsubBookings = () => {};
     if (profile?.role === 'OWNER' || profile?.role === 'ADMIN') {
-      const bookingsRef = collection(db, 'bookings');
-      
-      // Strict rule: list is based on facilityOwnerId or isListAdmin
-      let bookingsQ;
-      if (isSuperAdmin && profile.role === 'ADMIN') {
-        bookingsQ = query(bookingsRef, where('status', '==', 'PENDING'));
-      } else {
-        bookingsQ = query(
-          bookingsRef, 
-          where('facilityOwnerId', '==', user.uid),
-          where('status', '==', 'PENDING')
-        );
-      }
+      const fetchPendingBookings = async () => {
+        let query = supabase
+          .from('bookings')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'PENDING');
+        
+        if (profile.role !== 'ADMIN') {
+          query = query.eq('facility_owner_id', user.id);
+        }
 
-      unsubBookings = onSnapshot(bookingsQ, (snapshot) => {
-        setHasPendingBookings(!snapshot.empty);
-      }, (err) => {
-        handleFirestoreError(err, OperationType.GET, 'bookings', false);
-      });
+        const { count } = await query;
+        setHasPendingBookings((count || 0) > 0);
+      };
+
+      fetchPendingBookings();
+
+      const bookingsChannel = supabase.channel('pending-bookings')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
+          fetchPendingBookings();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(notificationsChannel);
+        supabase.removeChannel(chatsChannel);
+        supabase.removeChannel(bookingsChannel);
+      };
     }
 
     return () => {
-      unsubMessages();
-      unsubBookings();
-      unsubNotifications();
+      supabase.removeChannel(notificationsChannel);
+      supabase.removeChannel(chatsChannel);
     };
   }, [user, profile]);
 
@@ -135,22 +142,22 @@ export default function Layout() {
     location.pathname.startsWith('/facility-hub/live-monitor');
 
   return (
-    <div className="min-h-screen relative bg-charcoal selection:bg-lime/30 selection:text-white">
+    <div className="min-h-screen relative bg-[#0A0A0A] selection:bg-[#CCFF00]/30 selection:text-white font-sans antialiased">
       {/* Dynamic Background Accents */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
-        <div className="absolute -top-1/4 -right-1/4 w-1/2 h-1/2 bg-lime/10 rounded-full blur-[120px] animate-pulse" />
-        <div className="absolute -bottom-1/4 -left-1/4 w-1/2 h-1/2 bg-lime/5 rounded-full blur-[100px]" />
+        <div className="absolute -top-1/4 -right-1/4 w-1/2 h-1/2 bg-[#CCFF00]/5 rounded-full blur-[120px] animate-pulse" />
+        <div className="absolute -bottom-1/4 -left-1/4 w-1/2 h-1/2 bg-[#CCFF00]/3 rounded-full blur-[100px]" />
       </div>
 
       {!isAuthPage && (
         <nav className="fixed top-0 inset-x-0 h-20 glass z-[1000] flex flex-col justify-center backdrop-blur-3xl border-b border-white/5">
           <div className="w-full max-w-[1440px] mx-auto flex items-center justify-between px-2 sm:px-6 md:px-12 gap-2 sm:gap-6">
             <div className="flex items-center gap-2 flex-shrink-0 min-w-0">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-lime rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(181,245,90,0.4)] flex-shrink-0">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-[#CCFF00] rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(204,255,0,0.4)] flex-shrink-0">
                 <Activity className="text-black fill-black" size={20} />
               </div>
               <span className="hidden xs:block sm:block text-sm sm:text-lg lg:text-xl font-display font-black tracking-tighter uppercase italic text-white whitespace-nowrap">
-                SPOT<span className="text-lime">HUB</span>
+                SPOT<span className="text-[#CCFF00]">HUB</span>
               </span>
             </div>
 
@@ -179,25 +186,25 @@ export default function Layout() {
               {user && (
                 <button 
                   onClick={() => setIsNotificationDrawerOpen(true)}
-                  className="w-10 h-10 glass rounded-xl flex items-center justify-center hover:bg-white/10 transition-all text-slate-400 hover:text-lime border border-white/10 relative"
+                  className="w-10 h-10 glass rounded-xl flex items-center justify-center hover:bg-white/10 transition-all text-slate-400 hover:text-[#CCFF00] border border-white/10 relative"
                 >
                   <Bell size={20} />
                   {hasUnreadNotifications && (
-                    <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-lime rounded-full shadow-[0_0_10px_rgba(181,245,90,0.8)] animate-pulse" />
+                    <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-[#CCFF00] rounded-full shadow-[0_0_10px_rgba(204,255,0,0.8)] animate-pulse" />
                   )}
                 </button>
               )}
               {user ? (
                 <div className="hidden xs:flex items-center gap-3 bg-white/5 backdrop-blur-md px-3 sm:px-4 py-2 rounded-full border border-white/10">
                   <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 hidden sm:inline">{profile?.role}</span>
-                  <div className="w-7 h-7 bg-lime rounded-full flex items-center justify-center text-charcoal text-[11px] font-black italic">
+                  <div className="w-7 h-7 bg-[#CCFF00] rounded-full flex items-center justify-center text-charcoal text-[11px] font-black italic">
                     {profile?.name ? profile.name[0] : 'U'}
                   </div>
                 </div>
               ) : (
                 <button 
                   onClick={() => navigate('/login')}
-                  className="bg-lime text-charcoal px-5 sm:px-8 py-2.5 rounded-full font-black uppercase tracking-widest text-[9px] sm:text-[10px] hover:scale-105 active:scale-95 transition-all shadow-xl shadow-lime/20"
+                  className="bg-[#CCFF00] text-black px-5 sm:px-8 py-2.5 rounded-full font-black uppercase tracking-widest text-[9px] sm:text-[10px] hover:scale-105 active:scale-95 transition-all shadow-xl shadow-[#CCFF00]/20"
                 >
                   Sign In
                 </button>
@@ -253,7 +260,7 @@ export default function Layout() {
                 {isActive && (
                   <motion.div 
                     layoutId="navIndicator"
-                    className="absolute inset-0 bg-[#CCFF00] rounded-2xl border border-lime shadow-[0_10px_30px_rgba(204,255,0,0.4)]"
+                    className="absolute inset-0 bg-[#CCFF00] rounded-2xl border border-[#CCFF00]/40 shadow-[0_10px_30px_rgba(204,255,0,0.4)]"
                     transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                   />
                 )}

@@ -34,8 +34,8 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
         <div>
           <h2 className="text-4xl font-display font-black uppercase italic tracking-tighter">Master <span className="text-white/40">Schedule</span></h2>
-          <p className="text-[10px] font-black text-lime uppercase tracking-[0.4em] mt-2 flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-lime animate-ping" /> Real-time Availability Matrix
+          <p className="text-[10px] font-black text-[#CCFF00] uppercase tracking-[0.4em] mt-2 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#CCFF00] animate-ping" /> Real-time Availability Matrix
           </p>
         </div>
         <div className="flex flex-wrap lg:flex-nowrap items-end gap-4 w-full lg:w-auto">
@@ -68,7 +68,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
               </label>
               <button 
                 onClick={() => onBlockSlot('', '')}
-                className="bg-lime text-charcoal px-6 sm:px-8 h-[52px] rounded-2xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest shadow-lg shadow-lime/20 flex items-center justify-center gap-2 whitespace-nowrap w-full sm:w-auto"
+                className="bg-[#CCFF00] text-black px-6 sm:px-8 h-[52px] rounded-2xl text-[9px] sm:text-[10px] font-black uppercase tracking-widest shadow-lg shadow-[#CCFF00]/20 flex items-center justify-center gap-2 whitespace-nowrap w-full sm:w-auto"
               >
                 <Plus size={14} /> Block Slot
               </button>

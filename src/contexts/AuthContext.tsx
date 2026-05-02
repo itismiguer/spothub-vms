@@ -1,21 +1,20 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, onAuthStateChanged, signInWithPopup, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, setPersistence, browserSessionPersistence } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
-import { auth, db, googleProvider, appleProvider, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
+import { User, Session } from '@supabase/supabase-js';
 
 export type UserRole = 'PLAYER' | 'OWNER' | 'ADMIN' | 'STAFF';
 
 interface UserProfile {
-  uid: string;
+  id: string;
   email: string;
   name: string;
   role: UserRole;
-  facilityId?: string;
-  businessName?: string;
-  businessAddress?: string;
-  verificationDocUrl?: string;
-  verificationStatus?: 'pending' | 'verified' | 'rejected';
-  createdAt: any;
+  facility_id?: string;
+  business_name?: string;
+  business_address?: string;
+  verification_doc_url?: string;
+  verification_status?: 'pending' | 'verified' | 'rejected';
+  created_at: string;
 }
 
 interface AuthContextType {
@@ -23,7 +22,6 @@ interface AuthContextType {
   profile: UserProfile | null;
   loading: boolean;
   login: () => Promise<void>;
-  loginWithApple: () => Promise<void>;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
   registerWithEmail: (email: string, pass: string, name: string, role: UserRole, extra?: Partial<UserProfile>) => Promise<void>;
   logout: () => Promise<void>;
@@ -35,170 +33,108 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
-      if (user) {
-        let retries = 3;
-        while (retries > 0) {
-          try {
-            console.log("AuthProvider: Attempting to fetch profile for UID:", user.uid);
-            const docRef = doc(db, 'users', user.uid);
-            const docSnap = await getDoc(docRef);
-
-            if (docSnap.exists()) {
-              console.log("AuthProvider: Profile found in Firestore");
-              setProfile(docSnap.data() as UserProfile);
-            } else {
-              console.log("AuthProvider: Profile NOT found. Checking for pre-invites via email:", user.email);
-              if (user.email) {
-                // Check if user was pre-invited by email (e.g. Staff)
-                const emailQ = query(collection(db, 'users'), where('email', '==', user.email));
-                const emailSnap = await getDocs(emailQ);
-                
-                if (!emailSnap.empty) {
-                  console.log("AuthProvider: Pre-invite found. Upgrading to full profile.");
-                  const existingData = emailSnap.docs[0].data();
-                  const updatedProfile = {
-                    ...existingData,
-                    uid: user.uid,
-                    name: user.displayName || existingData.name || 'Staff Member'
-                  } as UserProfile;
-                  
-                  await setDoc(docRef, updatedProfile);
-                  setProfile(updatedProfile);
-                } else {
-                  console.log("AuthProvider: No pre-invite. Creating default PLAYER profile.");
-                  // New user - default to PLAYER
-                  const newProfile: UserProfile = {
-                    uid: user.uid,
-                    email: user.email || '',
-                    name: user.displayName || 'Guest User',
-                    role: 'PLAYER',
-                    createdAt: serverTimestamp(),
-                  };
-                  await setDoc(docRef, newProfile);
-                  setProfile(newProfile);
-                }
-              } else {
-                console.log("AuthProvider: No user email available. Creating default PLAYER profile.");
-                const newProfile: UserProfile = {
-                  uid: user.uid,
-                  email: '',
-                  name: user.displayName || 'Guest User',
-                  role: 'PLAYER',
-                  createdAt: serverTimestamp(),
-                };
-                await setDoc(docRef, newProfile);
-                setProfile(newProfile);
-              }
-            }
-
-            // Sync dummy user if needed (Only for admin)
-            if (user.email === 'miguel@builtbymiguel.net') {
-              const dummyDoc = doc(db, 'users', 'dummy-user-1');
-              const dummySnap = await getDoc(dummyDoc);
-              if (!dummySnap.exists()) {
-                await setDoc(dummyDoc, {
-                  uid: 'dummy-user-1',
-                  email: 'umbacmi@gmail.com',
-                  name: 'UMBAC MI',
-                  role: 'PLAYER',
-                  createdAt: serverTimestamp()
-                });
-              }
-            }
-
-            break; // Success, exit retry loop
-          } catch (error) {
-            console.error(`Error fetching/creating profile (attempts left: ${retries - 1}):`, error);
-            retries--;
-            if (retries > 0) {
-              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s before retry
-            }
-          }
-        }
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        fetchProfile(session.user.id);
       } else {
-        setProfile(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribe();
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        fetchProfile(session.user.id);
+      } else {
+        setProfile(null);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const login = async () => {
-    if (isLoggingIn) return;
-    setIsLoggingIn(true);
+  const fetchProfile = async (userId: string) => {
     try {
-      await setPersistence(auth, browserSessionPersistence);
-      await signInWithPopup(auth, googleProvider);
-    } catch (error: any) {
-      if (error.code === 'auth/popup-closed-by-user') {
-        console.warn("Login popup was closed before completion.");
-      } else if (error.code === 'auth/cancelled-popup-request') {
-        console.warn("Login request cancelled due to a newer request.");
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // Profile doesn't exist yet, we'll wait for registration flow
+        } else {
+          console.error('Error fetching profile:', error);
+        }
       } else {
-        console.error("Login Error:", error);
+        setProfile(data as UserProfile);
       }
+    } catch (err) {
+      console.error('Error in fetchProfile:', err);
     } finally {
-      setIsLoggingIn(false);
+      setLoading(false);
     }
   };
 
-  const loginWithApple = async () => {
-    if (isLoggingIn) return;
-    setIsLoggingIn(true);
-    try {
-      await setPersistence(auth, browserSessionPersistence);
-      await signInWithPopup(auth, appleProvider);
-    } catch (error: any) {
-      console.error("Apple Login Error:", error);
-    } finally {
-      setIsLoggingIn(false);
-    }
+  const login = async () => {
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin
+      }
+    });
   };
 
   const loginWithEmail = async (email: string, pass: string) => {
-    await setPersistence(auth, browserSessionPersistence);
-    await signInWithEmailAndPassword(auth, email, pass);
+    const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+    if (error) throw error;
   };
 
   const registerWithEmail = async (email: string, pass: string, name: string, role: UserRole, extra?: Partial<UserProfile>) => {
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    await updateProfile(cred.user, { displayName: name });
+    const { data, error } = await supabase.auth.signUp({ 
+      email, 
+      password: pass,
+      options: {
+        data: { name, role }
+      }
+    });
     
-    // Explicitly create profile
-    const docRef = doc(db, 'users', cred.user.uid);
+    if (error) throw error;
+    if (!data.user) return;
+
     const newProfile: any = {
-      uid: cred.user.uid,
+      id: data.user.id,
       email: email,
       name: name,
       role: role,
-      createdAt: serverTimestamp(),
       ...extra
     };
 
     if (role === 'OWNER') {
-      newProfile.verificationStatus = 'pending';
+      newProfile.verification_status = 'pending';
     }
 
-    await setDoc(docRef, newProfile);
+    const { error: profileError } = await supabase.from('users').insert([newProfile]);
+    if (profileError) throw profileError;
+    
     setProfile(newProfile as UserProfile);
   };
 
   const logout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error("Logout Error:", error);
-    }
+    await supabase.auth.signOut();
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, login, loginWithApple, loginWithEmail, registerWithEmail, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, login, loginWithEmail, registerWithEmail, logout }}>
       {children}
     </AuthContext.Provider>
   );

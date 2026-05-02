@@ -1,5 +1,3 @@
-import { Timestamp } from 'firebase/firestore';
-
 export interface Facility {
   id: string;
   name: string;
@@ -19,43 +17,47 @@ export interface Facility {
 
 export interface Court {
   id: string;
-  facilityId: string;
+  facility_id: string;
   name: string;
-  hourlyRate: number;
-  isActive?: boolean;
+  hourly_rate: number;
+  is_active?: boolean;
 }
 
 export interface Booking {
   id: string;
-  courtId: string;
-  userId: string;
-  userName?: string;
-  startTime: Timestamp;
-  endTime: Timestamp;
+  court_id: string;
+  user_id: string;
+  user_name?: string;
+  start_time: string;
+  end_time: string;
   status: string;
+  facility_id: string;
 }
 
 export interface Review {
   id: string;
-  userId: string;
-  userName: string;
-  facilityId: string;
-  bookingId: string;
+  user_id: string;
+  user_name: string;
+  facility_id: string;
+  booking_id: string;
   rating: number;
   comment: string;
-  createdAt: Timestamp;
-  ownerReply?: { text: string; updatedAt: Timestamp };
+  created_at: string;
+  owner_reply?: { text: string; updated_at: string };
   hidden?: boolean;
 }
 
-export type UserRole = 'OWNER' | 'ADMIN' | 'USER' | 'STAFF';
+export type UserRole = 'PLAYER' | 'OWNER' | 'ADMIN' | 'STAFF';
 
 export interface UserProfile {
-  uid: string;
+  id: string;
   email: string;
-  displayName?: string;
-  photoURL?: string;
+  name: string;
   role: UserRole;
-  facilityId?: string;
-  email_confirmed_at?: string;
+  facility_id?: string;
+  business_name?: string;
+  business_address?: string;
+  verification_doc_url?: string;
+  verification_status?: 'pending' | 'verified' | 'rejected';
+  created_at: string;
 }
