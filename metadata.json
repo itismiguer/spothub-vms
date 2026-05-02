@@ -1,0 +1,6 @@
+{
+  "name": "SPOTHUB",
+  "description": "Premium sports venue booking platform with tiered access for players, court owners, and admins.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["multi-tenant", "booking", "firebase-auth", "firestore"]
+}

@@ -1,0 +1,138 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Connectivity Test
+    match /test/{allPaths=**} {
+      allow read: if true;
+    }
+
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    function isListAdmin() {
+      return isSignedIn() && (request.auth.token.email == 'miguel@builtbymiguel.net' || request.auth.token.email == 'umbacmi@gmail.com');
+    }
+
+    function isAdmin() {
+      return isListAdmin();
+    }
+
+    function isUserOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function getUserData() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function hasRole(role) { return isSignedIn() && getUserData().role == role; }
+
+    // --- Collections ---
+
+    match /users/{userId} {
+      allow get: if isUserOwner(userId) || isAdmin();
+      allow list: if isListAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email);
+      allow create: if isUserOwner(userId);
+      allow update: if isUserOwner(userId) || (isAdmin() && incoming().diff(existing()).affectedKeys().hasAny(['verificationStatus', 'role', 'verifiedAt']));
+    }
+
+    match /system_settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /facilities/{facilityId} {
+      allow read: if true;
+      allow write: if isAdmin() || (isSignedIn() && existing().ownerId == request.auth.uid);
+    }
+
+    match /facilities/{facilityId}/courts/{courtId} {
+      allow read: if true;
+      allow write: if isAdmin() || (isSignedIn() && get(/databases/$(database)/documents/facilities/$(facilityId)).data.ownerId == request.auth.uid);
+    }
+
+    function isValidBooking(data) {
+      return data.courtId is string &&
+             data.courtName is string &&
+             data.facilityId is string &&
+             data.facilityName is string &&
+             data.facilityOwnerId is string &&
+             data.userId is string &&
+             data.userName is string &&
+             data.startTime is timestamp &&
+             data.endTime is timestamp &&
+             data.status in ['CONFIRMED', 'CANCELLED', 'MAINTENANCE', 'COMPLETED', 'PENDING', 'RESERVED', 'PENDING_PROOF', 'UNDER_REVIEW'] &&
+             data.amount is number;
+    }
+
+    match /bookings/{bookingId} {
+      allow list: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || 
+        isListAdmin() || 
+        resource.data.facilityOwnerId == request.auth.uid
+      );
+      allow get: if isSignedIn() && (
+        existing().userId == request.auth.uid || 
+        isAdmin() || 
+        existing().facilityOwnerId == request.auth.uid
+      );
+      allow create: if isSignedIn() && 
+                    incoming().userId == request.auth.uid &&
+                    isValidBooking(incoming());
+      allow update: if isSignedIn() && (
+        (isUserOwner(existing().userId) && (
+          (incoming().diff(existing()).affectedKeys().hasOnly(['status']) && incoming().status == 'CANCELLED') ||
+          (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentReceiptUrl', 'paymentProofUploadedAt']) && incoming().status == 'PENDING_PROOF')
+        )) ||
+        (isSignedIn() && existing().facilityOwnerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status'])) ||
+        isAdmin()
+      );
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isVerified();
+      allow update: if isAdmin() || (isSignedIn() && get(/databases/$(database)/documents/facilities/$(existing().facilityId)).data.ownerId == request.auth.uid);
+    }
+
+    // --- Chat System ---
+    match /chats/{chatId} {
+      function isChatParticipant() {
+        return isSignedIn() && (
+          request.auth.uid == resource.data.playerId || 
+          request.auth.uid == resource.data.facilityOwnerId
+        );
+      }
+      
+      function isValidChat(data) {
+        return data.playerId is string && data.facilityId is string &&
+               data.facilityOwnerId is string && data.playerName is string &&
+               data.facilityName is string;
+      }
+
+      allow list: if isChatParticipant() || isListAdmin();
+      allow get: if isChatParticipant() || isAdmin();
+      allow create: if isSignedIn() && isValidChat(incoming());
+      allow update: if isChatParticipant() || isAdmin();
+      
+      match /messages/{messageId} {
+        function isMessageSender() {
+           return isSignedIn() && incoming().senderId == request.auth.uid;
+        }
+        
+        allow list: if isChatParticipant() || isListAdmin();
+        allow get: if isChatParticipant() || isAdmin();
+        allow create: if (isChatParticipant() && (isMessageSender() || incoming().senderId == 'system')) || isAdmin();
+      }
+    }
+  }
+}

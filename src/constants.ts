@@ -1,0 +1,19 @@
+export const BRAND = {
+  PRIMARY_LIME: '#B5F55A',
+  CHARCOAL: '#0A0A0A',
+  SLATE_900: '#0F172A',
+  SLATE_800: '#1E293B',
+  SLATE_700: '#334155',
+  SLATE_600: '#475569',
+  SLATE_500: '#64748B',
+  SLATE_400: '#94A3B8',
+  SLATE_300: '#CBD5E1',
+  SLATE_200: '#E2E8F0',
+  SLATE_100: '#F1F5F9',
+  WHITE: '#FFFFFF',
+};
+
+export const LAYOUT = {
+  MAX_WIDTH: '1440px',
+  CONTAINER_PADDING: 'px-6 lg:px-12',
+};

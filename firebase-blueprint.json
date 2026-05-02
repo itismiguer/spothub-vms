@@ -1,0 +1,156 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role-based access control and verification status.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["PLAYER", "OWNER", "ADMIN", "STAFF"] },
+        "facilityId": { "type": "string", "description": "Linked facility for staff members." },
+        "verificationStatus": { "type": "string", "enum": ["pending", "verified", "rejected"] },
+        "kycUrl": { "type": "string", "description": "URL to business permit document." },
+        "kycUploadedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Facility": {
+      "title": "Facility",
+      "description": "A facility offering court rentals (e.g., a Pickleball club).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "description": { "type": "string" },
+        "address": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "images": { "type": "array" },
+        "coverImage": { "type": "string" },
+        "amenities": { "type": "array" },
+        "isActive": { "type": "boolean", "description": "Global availability toggle." },
+        "operating_hours": { 
+          "type": "object",
+          "properties": {
+            "open": { "type": "string" },
+            "close": { "type": "string" }
+          }
+        },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "type", "ownerId", "lat", "lng"]
+    },
+    "SystemSettings": {
+      "title": "System Settings",
+      "description": "Global platform configuration.",
+      "type": "object",
+      "properties": {
+        "global_sms_enabled": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Court": {
+      "title": "Court",
+      "description": "A specific court within a facility.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "facilityId": { "type": "string" },
+        "name": { "type": "string" },
+        "hourlyRate": { "type": "number" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["facilityId", "name", "hourlyRate"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "A court reservation session.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courtId": { "type": "string" },
+        "facilityId": { "type": "string" },
+        "userId": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["CONFIRMED", "CANCELLED", "MAINTENANCE", "COMPLETED"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["courtId", "facilityId", "userId", "startTime", "endTime"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "A player's review of a facility based on a booking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "facilityId": { "type": "string" },
+        "bookingId": { "type": "string" },
+        "rating": { "type": "number", "minimum": 1, "maximum": 5 },
+        "comment": { "type": "string" },
+        "hidden": { "type": "boolean" },
+        "ownerReply": {
+          "type": "object",
+          "properties": {
+            "text": { "type": "string" },
+            "updatedAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "facilityId", "bookingId", "rating", "comment"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "System or local notification for a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["booking_confirmed", "booking_expired", "proof_uploaded", "new_booking"] },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "relatedId": { "type": "string", "description": "ID of the related booking or facility." }
+      },
+      "required": ["userId", "title", "message", "type", "read"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and roles."
+    },
+    "/facilities/{facilityId}": {
+      "schema": "Facility",
+      "description": "Facility information."
+    },
+    "/facilities/{facilityId}/courts/{courtId}": {
+      "schema": "Court",
+      "description": "Courts associated with a facility."
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Reservations across all facilities."
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "User reviews for facilities."
+    },
+    "/system_settings/global": {
+      "schema": "SystemSettings",
+      "description": "Global system configuration document."
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Global and targeted notifications."
+    }
+  }
+}
