@@ -3,10 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+console.log('Supabase Connection Attempted');
 console.log('Supabase URL Loaded:', !!supabaseUrl);
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('Supabase credentials missing. Please check your environment variables.');
+  console.error('Supabase credentials missing! Site will show MISSING KEYS.');
 }
 
 export const supabase = createClient(

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Shield, Users, Building2, TrendingUp, Search, MoreVertical, CheckCircle, XCircle, Database, Loader2, Star, Eye, EyeOff, MessageCircle, Settings, Plus, ShieldCheck, FileText, ChevronDown, Bell, Clock, ShieldAlert } from 'lucide-react';
+import { Shield, Users, Building2, TrendingUp, Search, MoreVertical, CheckCircle, XCircle, Database, Loader2, Star, Eye, EyeOff, MessageCircle, Settings, Plus, ShieldCheck, FileText, ChevronDown, Bell, Clock, ShieldAlert, DollarSign, BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area } from 'recharts';
 import { seedDemoData } from '../services/seedService';
 import { useAuth } from '../contexts/AuthContext';
 import Selector from '../components/Selector';
@@ -64,6 +65,7 @@ export default function AdminDashboard() {
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [revenueLogs, setRevenueLogs] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [systemSettings, setSystemSettings] = useState<SystemSettings>({ global_sms_enabled: true });
   const [loading, setLoading] = useState(true);
@@ -197,6 +199,9 @@ export default function AdminDashboard() {
       const { data: bookingData } = await supabase.from('bookings').select('*');
       setBookings(bookingData as Booking[] || []);
 
+      const { data: revData } = await supabase.from('revenue_logs').select('*').order('created_at', { ascending: true });
+      setRevenueLogs(revData || []);
+
       const { data: notificationsData } = await supabase.from('notifications').select('*').limit(50);
       setNotifications(notificationsData || []);
 
@@ -280,10 +285,10 @@ export default function AdminDashboard() {
   const tabs = [
     { id: 'overview', label: 'Overview', icon: TrendingUp },
     { id: 'bookings', label: 'Bookings', icon: FileText },
+    { id: 'verification', label: 'Approvals', icon: ShieldCheck, badge: bookings.filter(b => b.status === 'UNDER_REVIEW').length > 0 },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'facilities', label: 'Facilities', icon: Building2 },
     { id: 'reviews', label: 'Moderation', icon: MessageCircle },
-    { id: 'verification', label: 'Verifications', icon: ShieldCheck, badge: pendingVerificationUsers.length > 0 },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'settings', label: 'System', icon: Settings }
   ];
@@ -343,11 +348,11 @@ export default function AdminDashboard() {
               {[
                 { label: 'Total Users', value: users.length, icon: Users, color: 'cyan' },
                 { label: 'Active Facilities', value: facilities.length, icon: Building2, color: 'blue' },
-                { label: 'System Reviews', value: reviews.length, icon: Star, color: 'orange' },
+                { label: 'System Revenue', value: `₱${revenueLogs.reduce((acc, l) => acc + (l.amount || 0), 0).toLocaleString()}`, icon: DollarSign, color: 'green' },
                 { label: 'Market Flow', value: 'High', icon: TrendingUp, color: 'green' },
               ].map((stat, i) => (
                 <div key={i} className="glass p-6 sm:p-8 rounded-[32px] sm:rounded-[48px] border-white/5 space-y-6">
-                  <stat.icon className="text-cyan/40" size={28} sm:size={32} />
+                  <stat.icon className="text-cyan/40" size={28} />
                   <div>
                     <p className="text-3xl sm:text-4xl font-display font-black italic text-white leading-none">{stat.value}</p>
                     <p className="text-[10px] uppercase font-bold tracking-widest text-slate-500 mt-2">{stat.label}</p>
@@ -355,6 +360,72 @@ export default function AdminDashboard() {
                 </div>
               ))}
             </div>
+
+            {/* Revenue Chart Section */}
+            <section className="glass p-8 sm:p-12 rounded-[48px] border-white/5 space-y-8 relative overflow-hidden">
+               <div className="absolute top-0 right-0 w-96 h-96 bg-cyan/5 rounded-full blur-[120px] -translate-y-1/2 translate-x-1/2" />
+               <div className="flex items-center justify-between relative">
+                  <div className="space-y-1">
+                    <h2 className="text-3xl font-display font-black uppercase italic tracking-tighter leading-none">Revenue <span className="text-white/40">Tracking</span></h2>
+                    <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest">Global Marketplace Volume</p>
+                  </div>
+                  <BarChart3 className="text-cyan animate-pulse" size={32} />
+               </div>
+
+               <div className="h-[400px] w-full pt-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={revenueLogs.map(l => ({
+                        date: new Date(l.created_at).toLocaleDateString(),
+                        amount: l.amount
+                      }))}
+                    >
+                      <defs>
+                        <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#22D3EE" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#22D3EE" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                      <XAxis 
+                        dataKey="date" 
+                        stroke="#475569" 
+                        fontSize={10} 
+                        tickLine={false} 
+                        axisLine={false}
+                        dy={10}
+                      />
+                      <YAxis 
+                        stroke="#475569" 
+                        fontSize={10} 
+                        tickLine={false} 
+                        axisLine={false}
+                        tickFormatter={(v) => `₱${v}`}
+                      />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: '#0F172A', 
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '16px',
+                          fontSize: '10px',
+                          textTransform: 'uppercase',
+                          fontWeight: '900',
+                          letterSpacing: '1px'
+                        }}
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="amount" 
+                        stroke="#22D3EE" 
+                        strokeWidth={4}
+                        fillOpacity={1} 
+                        fill="url(#colorRevenue)" 
+                        animationDuration={2000}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+               </div>
+            </section>
 
             <section className="glass p-6 sm:p-12 rounded-[32px] sm:rounded-[56px] border-white/10 shadow-2xl space-y-8 sm:space-y-10 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-96 h-96 bg-cyan/10 rounded-full blur-[120px] -translate-y-1/2 translate-x-1/2" />
@@ -689,9 +760,106 @@ export default function AdminDashboard() {
             exit={{ opacity: 0, x: -20 }}
             className="space-y-12"
           >
+            {/* Booking Approvals Section */}
+            <div className="glass rounded-[48px] border-white/5 overflow-hidden">
+               <div className="p-10 border-b border-white/5 glass flex items-center justify-between">
+                  <div className="space-y-1">
+                    <h2 className="text-2xl font-display font-black uppercase italic tracking-tight">Payment <span className="text-white/40">Verification</span></h2>
+                    <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">Validate proof of payment (UNDER_REVIEW Bookings)</p>
+                  </div>
+                  <div className="w-12 h-12 bg-cyan/10 rounded-2xl flex items-center justify-center text-cyan">
+                    <ShieldCheck size={24} />
+                  </div>
+               </div>
+               <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-white/5 bg-white/5">
+                        <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest">Participant</th>
+                        <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest">Venue & Price</th>
+                        <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest">Evidence</th>
+                        <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest text-right">Approval Cycle</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {bookings.filter(b => b.status === 'UNDER_REVIEW').length > 0 ? (
+                        bookings.filter(b => b.status === 'UNDER_REVIEW').map((b) => (
+                          <tr key={b.id} className="hover:bg-white/5 transition-colors group">
+                            <td className="px-10 py-6">
+                              <div className="font-display font-black uppercase italic text-lg leading-none">{b.user_name}</div>
+                              <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">{b.booking_reference}</div>
+                            </td>
+                            <td className="px-10 py-6">
+                               <div className="text-xs font-bold text-white uppercase tracking-tight">{b.facility_name}</div>
+                               <div className="text-lg font-display font-black italic text-cyan/60 leading-tight mt-1">₱{b.amount?.toLocaleString()}</div>
+                            </td>
+                            <td className="px-10 py-6">
+                              {b.payment_receipt_url ? (
+                                <a href={b.payment_receipt_url} target="_blank" rel="noopener noreferrer" className="inline-block p-1 bg-white/5 rounded-xl border border-white/10 hover:border-cyan/40 transition-all">
+                                   <img src={b.payment_receipt_url} className="w-20 h-20 object-cover rounded-lg" alt="Proof" />
+                                </a>
+                              ) : (
+                                <span className="text-slate-600 font-bold text-[10px] uppercase tracking-widest">Void</span>
+                              )}
+                            </td>
+                            <td className="px-10 py-6 text-right space-x-4">
+                              <button 
+                                onClick={async () => {
+                                  try {
+                                    const { error } = await supabase.from('bookings').update({ status: 'CONFIRMED' }).eq('id', b.id);
+                                    if (error) throw error;
+                                    
+                                    // Log to revenue logs
+                                    await supabase.from('revenue_logs').insert({
+                                      booking_id: b.id,
+                                      amount: b.amount,
+                                      facility_id: b.facility_id
+                                    });
+
+                                    toast.success('BOOKING CONFIRMED: Revenue recorded.', { icon: '💰' });
+                                    fetchData();
+                                  } catch (e) {
+                                    toast.error('Confirmation sequence failed.');
+                                  }
+                                }}
+                                className="px-6 py-3 bg-cyan text-charcoal rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-xl shadow-cyan/20"
+                              >
+                                Approve
+                              </button>
+                              <button 
+                                onClick={async () => {
+                                  try {
+                                    const { error } = await supabase.from('bookings').update({ status: 'CANCELLED' }).eq('id', b.id);
+                                    if (error) throw error;
+                                    toast.error('BOOKING REJECTED');
+                                    fetchData();
+                                  } catch (e) {
+                                    toast.error('Rejection failed.');
+                                  }
+                                }}
+                                className="px-6 py-3 bg-white/5 text-red-400 border border-red-500/10 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-500/10 transition-all"
+                              >
+                                Reject
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={4} className="px-10 py-20 text-center text-slate-600 font-bold uppercase tracking-widest text-xs italic">
+                            Transactional stream is clear. No payments for review.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+               </div>
+            </div>
+
+            {/* Operator Verification Section */}
             <div className="glass rounded-[48px] border-white/5 overflow-hidden">
                <div className="p-10 border-b border-white/5 glass">
-                  <h2 className="text-2xl font-display font-black uppercase italic tracking-tight">Pending <span className="text-white/40">Approvals</span></h2>
+                  <h2 className="text-2xl font-display font-black uppercase italic tracking-tight text-white/60">Operator <span className="text-white/20">Verifications</span></h2>
                </div>
                <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">

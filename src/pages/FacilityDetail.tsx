@@ -65,6 +65,7 @@ export default function FacilityDetail() {
   const [facility, setFacility] = useState<Facility | null>(null);
   const [courts, setCourts] = useState<Court[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [timeSlotsTable, setTimeSlotsTable] = useState<any[]>([]); // New state for time_slots table
   const [reviews, setReviews] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
   const [selectedCourt, setSelectedCourt] = useState<string | null>(null);
@@ -73,7 +74,8 @@ export default function FacilityDetail() {
   const [isStartingChat, setIsStartingChat] = useState(false);
   const [pendingBookingStart, setPendingBookingStart] = useState<Date | null>(null);
   const [bookingEnd, setBookingEnd] = useState<string>(''); // format 'HH:mm'
-  const [paymentReceipt, setPaymentReceipt] = useState<string | null>(null);
+  const [paymentFile, setPaymentFile] = useState<File | null>(null);
+  const [paymentPreview, setPaymentPreview] = useState<string | null>(null);
   const [isReporting, setIsReporting] = useState(false);
   const [reportType, setReportType] = useState('Maintenance Required');
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
@@ -173,6 +175,10 @@ export default function FacilityDetail() {
 
         const { data: bookingsData } = await supabase.from('bookings').select('*').eq('facility_id', id);
         setBookings(bookingsData as Booking[] || []);
+
+        // Optional: Fetch from time_slots table if user integration is active
+        const { data: tsData } = await supabase.from('time_slots').select('*').in('court_id', courtsData?.map(c => c.id) || []);
+        setTimeSlotsTable(tsData || []);
 
         const { data: reviewsData } = await supabase.from('reviews').select('*').eq('facility_id', id);
         setReviews(reviewsData || []);
@@ -346,7 +352,7 @@ export default function FacilityDetail() {
     }
 
     if (!selectedCourt || !id || !facility) return;
-    if (!paymentReceipt) {
+    if (!paymentFile) {
       toast.error('PAYMENT REQUIRED: Please upload a receipt screenshot.');
       return;
     }
@@ -371,6 +377,24 @@ export default function FacilityDetail() {
     setIsBooking(true);
 
     try {
+      // 1. Upload Payment Receipt to Supabase Storage
+      const fileExt = paymentFile.name.split('.').pop();
+      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const filePath = `receipts/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('bookings')
+        .upload(filePath, paymentFile);
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        throw new Error('Failed to upload payment receipt.');
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('bookings')
+        .getPublicUrl(filePath);
+
       // Direct overlap check via query
       const { data: overlaps } = await supabase
         .from('bookings')
@@ -393,9 +417,6 @@ export default function FacilityDetail() {
       const bookingRef = `#APP-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
       const selectedCourtData = courts.find(c => c.id === selectedCourt);
       
-      // Expiration: 20 minutes from now
-      const expiresAt = new Date(Date.now() + 20 * 60000);
-
       const bookingData = {
         court_id: selectedCourt,
         court_name: selectedCourtData?.name || 'Unknown Court',
@@ -406,10 +427,10 @@ export default function FacilityDetail() {
         user_name: profile?.name || user.email,
         start_time: pendingBookingStart.toISOString(),
         end_time: endTime.toISOString(),
-        status: 'RESERVED',
-        expires_at: expiresAt.toISOString(),
+        status: 'UNDER_REVIEW', // Changed from RESERVED to UNDER_REVIEW
         booking_reference: bookingRef,
         amount: (selectedCourtData?.hourly_rate || 0) * (durationMinutes / 60),
+        payment_receipt_url: publicUrl, // Save the public URL
       };
 
       const { data: newBooking, error: bookingErr } = await supabase
@@ -421,16 +442,16 @@ export default function FacilityDetail() {
       if (bookingErr) throw bookingErr;
 
       await supabase.from('notifications').insert({
-        user_id: user.id,
-        title: 'Slot Reserved',
-        message: `You have 20 minutes to upload proof for ${selectedCourtData?.name}.`,
+        user_id: facility.owner_id, // Notify the owner
+        title: 'New Payment for Review',
+        message: `${bookingData.user_name} uploaded proof for ${selectedCourtData?.name}.`,
         type: 'new_booking',
         read: false,
         related_id: newBooking.id
       });
 
       setLastBookingId(newBooking.id);
-      setCurrentBookingStatus('RESERVED');
+      setCurrentBookingStatus('UNDER_REVIEW');
       
       setLastBookingData({
         ...bookingData,
@@ -439,12 +460,14 @@ export default function FacilityDetail() {
         id: newBooking.id
       });
 
-      toast.success('SLOT RESERVED: 20 Minutes to Secure!', {
+      toast.success('BOOKING SUBMITTED: Awaiting Owner Verification!', {
         duration: 5000,
         icon: '⏳',
       });
 
-      navigate('/my-bookings');
+      setShowSuccessModal(true);
+      setPendingBookingStart(null);
+      setBookingEnd('');
       
     } catch (error) {
       console.error("Booking write error:", error);
@@ -728,35 +751,24 @@ export default function FacilityDetail() {
               <div className="space-y-4">
                 <label className="text-[10px] uppercase font-bold tracking-widest text-white/50 ml-2">Time Matrix</label>
                 <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto no-scrollbar pr-2">
-                  {timeSlots.map((slot, i) => {
+                  {timeSlots.filter(slot => {
                     const status = getSlotStatus(slot);
                     const isPast = isBefore(slot, new Date());
-                    
-                    const isReserved = status === 'RESERVED' || status === 'PENDING_PROOF';
-                    const isUnderReview = status === 'UNDER_REVIEW';
-                    const isConfirmed = status === 'CONFIRMED' || status === 'MAINTENANCE' || status === 'MANUAL_BLOCK';
-                    const isOccupied = isReserved || isUnderReview || isConfirmed;
-                    
+                    const isOccupied = ['CONFIRMED', 'MAINTENANCE', 'manual_block', 'RESERVED', 'PENDING_PROOF', 'UNDER_REVIEW'].includes(status.toUpperCase());
+                    return !isOccupied && !isPast;
+                  }).map((slot, i) => {
+                    const status = getSlotStatus(slot);
                     const isSelected = pendingBookingStart && slot.getTime() === pendingBookingStart.getTime();
                     
                     let statusClasses = 'bg-white/5 border-white/10 text-slate-300 hover:bg-lime hover:text-charcoal hover:border-lime';
                     
                     if (isSelected) {
                       statusClasses = 'bg-lime text-charcoal border-lime shadow-[0_0_15px_rgba(181,245,90,0.4)]';
-                    } else if (isConfirmed) {
-                      statusClasses = 'bg-white/10 border-white/5 text-slate-500 cursor-not-allowed shadow-none opacity-40';
-                    } else if (isReserved) {
-                      statusClasses = 'bg-orange-500/10 border-orange-500/20 text-orange-500/50 cursor-not-allowed [background-image:linear-gradient(45deg,rgba(249,115,22,0.1)_25%,transparent_25%,transparent_50%,rgba(249,115,22,0.1)_50%,rgba(249,115,22,0.1)_75%,transparent_75%,transparent)] [background-size:10px_10px]';
-                    } else if (isUnderReview) {
-                      statusClasses = 'bg-blue-500/20 border-blue-500/30 text-blue-400 cursor-not-allowed';
-                    } else if (isPast) {
-                      statusClasses = 'bg-white/5 border-transparent text-white/5 opacity-50 cursor-not-allowed pointer-events-none';
                     }
 
                     return (
                       <button
                         key={i}
-                        disabled={isOccupied || isPast}
                         onClick={() => {
                           if (!user) {
                             navigate('/register', { state: { from: location } });
@@ -767,9 +779,6 @@ export default function FacilityDetail() {
                         className={`p-2 rounded-xl text-[10px] font-bold transition-all border focus:outline-none focus:ring-2 focus:ring-lime focus:ring-offset-2 focus:ring-offset-charcoal flex flex-col items-center justify-center gap-1 min-h-[50px] ${statusClasses}`}
                       >
                         <span className="leading-none">{format(slot, 'h:mm a')}</span>
-                        {isReserved && <Clock size={10} className="animate-pulse text-orange-500" />}
-                        {isUnderReview && <ShieldAlert size={10} className="animate-pulse text-[#CCFF00]" />}
-                        {isConfirmed && <CheckCircle2 size={10} opacity={0.5} />}
                       </button>
                     );
                   })}
@@ -873,7 +882,7 @@ export default function FacilityDetail() {
                   <div className="bg-white/5 border border-white/10 rounded-[32px] p-8 space-y-6">
                     <header className="flex items-center justify-between">
                        <label className="text-[10px] uppercase font-black text-slate-500 tracking-[0.2em]">Payment Receipt (Required)</label>
-                       {paymentReceipt && <CheckCircle2 size={14} className="text-lime" />}
+                       {paymentPreview && <CheckCircle2 size={14} className="text-lime" />}
                     </header>
                     
                     <div className="relative group">
@@ -883,9 +892,10 @@ export default function FacilityDetail() {
                          onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) {
+                               setPaymentFile(file);
                                const reader = new FileReader();
                                reader.onloadend = () => {
-                                  setPaymentReceipt(reader.result as string);
+                                  setPaymentPreview(reader.result as string);
                                   toast.success('Receipt loaded successfully!');
                                };
                                reader.readAsDataURL(file);
@@ -894,9 +904,9 @@ export default function FacilityDetail() {
                          className="absolute inset-0 opacity-0 cursor-pointer z-10"
                        />
                        <div className={`w-full h-32 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center gap-3 transition-all ${
-                         paymentReceipt ? 'border-lime/40 bg-lime/5' : 'border-white/10 bg-white/5 group-hover:border-lime/20'
+                         paymentPreview ? 'border-lime/40 bg-lime/5' : 'border-white/10 bg-white/5 group-hover:border-lime/20'
                        }`}>
-                          {paymentReceipt ? (
+                          {paymentPreview ? (
                             <div className="flex flex-col items-center gap-2">
                                <CheckCircle2 size={24} className="text-lime" />
                                <span className="text-[10px] font-black uppercase text-lime">Image Captured</span>
@@ -1024,8 +1034,8 @@ export default function FacilityDetail() {
                 
                 <div className="space-y-4">
                   <h2 className="text-3xl sm:text-4xl md:text-5xl font-display font-black uppercase italic tracking-tighter text-lime leading-none whitespace-normal break-words">
-                    {currentBookingStatus === 'PENDING' ? (
-                      <>Approval <br/><span className="text-orange-500">Pending</span></>
+                    {currentBookingStatus === 'UNDER_REVIEW' ? (
+                      <>Payment <br/><span className="text-orange-500">Under Review</span></>
                     ) : (
                       <>Booking <br/><span className="text-white">Confirmed</span></>
                     )}
@@ -1039,7 +1049,7 @@ export default function FacilityDetail() {
                         </div>
                         <div className="text-left sm:text-right w-full sm:w-auto">
                           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 mb-1">Ref ID</p>
-                          <p className={`text-[10px] sm:text-[11px] font-black uppercase tracking-widest px-3 py-1 rounded-full border inline-block ${currentBookingStatus === 'PENDING' ? 'text-orange-500 bg-orange-500/10 border-orange-500/20' : 'text-lime bg-lime/10 border-lime/20'}`}>{lastBookingData.booking_reference}</p>
+                          <p className={`text-[10px] sm:text-[11px] font-black uppercase tracking-widest px-3 py-1 rounded-full border inline-block ${currentBookingStatus === 'UNDER_REVIEW' ? 'text-orange-500 bg-orange-500/10 border-orange-500/20' : 'text-lime bg-lime/10 border-lime/20'}`}>{lastBookingData.booking_reference}</p>
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-4 border-t border-white/5 pt-4">
@@ -1050,7 +1060,7 @@ export default function FacilityDetail() {
                          <div>
                             <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 mb-1">Status</p>
                             <p className="text-xs sm:text-sm font-bold text-white whitespace-normal break-words">
-                               {currentBookingStatus === 'PENDING' ? 'Awaiting Auth' : 'Verified'}
+                               {currentBookingStatus === 'UNDER_REVIEW' ? 'Reviewing Proof' : 'Verified'}
                             </p>
                          </div>
                       </div>
@@ -1058,8 +1068,8 @@ export default function FacilityDetail() {
                 </div>
 
                 <p className="text-[13px] sm:text-sm md:text-base font-bold text-slate-400 uppercase tracking-widest leading-relaxed px-2 italic whitespace-normal break-words">
-                  {currentBookingStatus === 'PENDING' 
-                    ? "The facility owner has been notified. You will receive an alert once your slot is verified."
+                  {currentBookingStatus === 'UNDER_REVIEW' 
+                    ? "The facility owner has been notified. You will receive an alert once your payment is verified."
                     : "Your reservation is secured. Please arrive 10 minutes prior to your session for check-in."}
                 </p>
 
