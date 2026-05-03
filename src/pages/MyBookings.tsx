@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, getDocs, orderBy, doc, updateDoc, getDoc, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { format, isAfter } from 'date-fns';
 import { Calendar, Clock, MapPin, XCircle, CheckCircle2, Trophy, Star, Plus, Loader2 } from 'lucide-react';
@@ -9,25 +8,25 @@ import { toast } from 'sonner';
 
 interface Booking {
   id: string;
-  facilityId: string;
-  courtId: string;
-  startTime: any;
-  endTime: any;
+  facility_id: string;
+  court_id: string;
+  start_time: string;
+  end_time: string;
   status: string;
-  facilityName?: string;
-  courtName?: string;
-  hasReview?: boolean;
-  expiresAt?: any;
-  bookingReference?: string;
+  facility_name?: string;
+  court_name?: string;
+  has_review?: boolean;
+  expires_at?: string;
+  booking_reference?: string;
   amount?: number;
 }
 
-const CountdownTimer = ({ expiresAt, onExpire }: { expiresAt: any; onExpire: () => void }) => {
+const CountdownTimer = ({ expiresAt, onExpire }: { expiresAt: string; onExpire: () => void }) => {
   const [timeLeft, setTimeLeft] = useState<string>('');
 
   useEffect(() => {
     const timer = setInterval(() => {
-      const expiry = expiresAt.toDate ? expiresAt.toDate() : new Date(expiresAt);
+      const expiry = new Date(expiresAt);
       const diff = expiry.getTime() - new Date().getTime();
 
       if (diff <= 0) {
@@ -53,7 +52,7 @@ const CountdownTimer = ({ expiresAt, onExpire }: { expiresAt: any; onExpire: () 
 };
 
 export default function MyBookings() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCancelling, setIsCancelling] = useState<string | null>(null);
@@ -64,38 +63,45 @@ export default function MyBookings() {
   useEffect(() => {
     if (!user) return;
     
-    const q = query(
-      collection(db, 'bookings'), 
-      where('userId', '==', user.uid),
-      orderBy('startTime', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(q, async (snap) => {
+    async function fetchBookings() {
       try {
-        const bookingsList = snap.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Booking[];
-        setBookings(bookingsList);
+        const { data, error } = await supabase
+          .from('bookings')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('start_time', { ascending: false });
+
+        if (error) throw error;
+        setBookings(data as Booking[]);
       } catch (error) {
-        handleFirestoreError(error, OperationType.LIST, 'bookings', false);
+        console.error("Fetch bookings error:", error);
       } finally {
         setLoading(false);
       }
-    }, (error) => {
-      console.error("MyBookings listener error:", error);
-      handleFirestoreError(error, OperationType.LIST, 'bookings', false);
-      setLoading(false);
-    });
+    }
 
-    return () => unsubscribe();
+    fetchBookings();
+
+    const subscription = supabase.channel('my-bookings')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `user_id=eq.${user.id}` }, () => {
+        fetchBookings();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [user]);
 
   const handleCancel = async (id: string) => {
     setIsCancelling(id);
     try {
-      await updateDoc(doc(db, 'bookings', id), { status: 'CANCELLED' });
-      setBookings(prev => prev.map(b => b.id === id ? { ...b, status: 'CANCELLED' } : b));
+      const { error } = await supabase
+        .from('bookings')
+        .update({ status: 'CANCELLED' })
+        .eq('id', id);
+      
+      if (error) throw error;
       toast.info('Booking cancelled successfully.');
     } catch (error) {
       toast.error('Failed to cancel booking.');
@@ -109,21 +115,20 @@ export default function MyBookings() {
     if (!user || !reviewingBooking) return;
     setIsSubmittingReview(true);
     try {
-      const userProfileSnap = await getDoc(doc(db, 'users', user.uid));
-      const userName = userProfileSnap.data()?.name || 'Player';
-
-      await addDoc(collection(db, 'reviews'), {
-        userId: user.uid,
-        userName,
-        facilityId: reviewingBooking.facilityId,
-        bookingId: reviewingBooking.id,
+      const { error } = await supabase.from('reviews').insert({
+        user_id: user.id,
+        user_name: profile?.name || 'Player',
+        facility_id: reviewingBooking.facility_id,
+        booking_id: reviewingBooking.id,
         rating: reviewForm.rating,
         comment: reviewForm.comment,
-        createdAt: serverTimestamp(),
         hidden: false
       });
       
-      setBookings(prev => prev.map(b => b.id === reviewingBooking.id ? { ...b, hasReview: true } : b));
+      if (error) throw error;
+
+      await supabase.from('bookings').update({ has_review: true }).eq('id', reviewingBooking.id);
+      
       setReviewingBooking(null);
       setReviewForm({ rating: 5, comment: '' });
       toast.success('Your review has been launched!');
@@ -139,10 +144,15 @@ export default function MyBookings() {
   const handleSetPaid = async (bookingId: string) => {
     setIsUploading(bookingId);
     try {
-      await updateDoc(doc(db, 'bookings', bookingId), { 
-        status: 'PENDING_PROOF',
-        updatedAt: serverTimestamp()
-      });
+      const { error } = await supabase
+        .from('bookings')
+        .update({ 
+          status: 'PENDING_PROOF',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', bookingId);
+      
+      if (error) throw error;
       toast.success('STATUS UPDATED: Please upload your payment screenshot to finalize.');
     } catch (error) {
       toast.error('Update failed.');
@@ -154,12 +164,16 @@ export default function MyBookings() {
   const handleUploadProof = async (bookingId: string) => {
     setIsUploading(bookingId);
     try {
-      await updateDoc(doc(db, 'bookings', bookingId), { 
-        status: 'UNDER_REVIEW',
-        paymentProofUploadedAt: serverTimestamp(),
-        // Mocking the URL for this environment
-        paymentReceiptUrl: 'https://images.unsplash.com/photo-1554224155-16974398755b?q=80&w=3011&auto=format&fit=crop'
-      });
+      const { error } = await supabase
+        .from('bookings')
+        .update({ 
+          status: 'UNDER_REVIEW',
+          payment_proof_uploaded_at: new Date().toISOString(),
+          payment_receipt_url: 'https://images.unsplash.com/photo-1554224155-16974398755b?q=80&w=3011&auto=format&fit=crop'
+        })
+        .eq('id', bookingId);
+      
+      if (error) throw error;
       toast.success('PROOF UPLOADED: Your reservation is now under staff review.');
     } catch (error) {
       toast.error('Uplink failed. Please retry proof upload.');
@@ -172,9 +186,9 @@ export default function MyBookings() {
 
   const upcoming = bookings.filter(b => 
     (b.status === 'CONFIRMED' || b.status === 'PENDING' || b.status === 'RESERVED' || b.status === 'PENDING_PROOF' || b.status === 'UNDER_REVIEW') && 
-    isAfter(b.startTime.toDate(), new Date())
+    isAfter(new Date(b.start_time), new Date())
   );
-  const past = bookings.filter(b => b.status === 'CANCELLED' || b.status === 'COMPLETED' || (!isAfter(b.startTime.toDate(), new Date()) && !['RESERVED', 'PENDING_PROOF', 'UNDER_REVIEW'].includes(b.status)));
+  const past = bookings.filter(b => b.status === 'CANCELLED' || b.status === 'COMPLETED' || (!isAfter(new Date(b.start_time), new Date()) && !['RESERVED', 'PENDING_PROOF', 'UNDER_REVIEW'].includes(b.status)));
 
   return (
     <div className="max-w-6xl mx-auto px-0 sm:px-12 py-12 pb-32 space-y-12">
@@ -221,12 +235,12 @@ export default function MyBookings() {
                 >
                     <div className="flex gap-8 items-center">
                       <div className="w-20 h-20 bg-white/5 rounded-3xl flex flex-col items-center justify-center border border-white/10">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{format(booking.startTime.toDate(), 'MMM')}</span>
-                        <span className="text-2xl font-display font-black italic leading-none">{format(booking.startTime.toDate(), 'dd')}</span>
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{format(new Date(booking.start_time), 'MMM')}</span>
+                        <span className="text-2xl font-display font-black italic leading-none">{format(new Date(booking.start_time), 'dd')}</span>
                       </div>
                       <div className="space-y-1">
                         <div className="flex items-center gap-3">
-                          <h3 className="font-display font-black text-2xl uppercase italic group-hover:text-lime transition-colors leading-tight">{booking.facilityName}</h3>
+                          <h3 className="font-display font-black text-2xl uppercase italic group-hover:text-lime transition-colors leading-tight">{booking.facility_name}</h3>
                           {booking.status === 'PENDING' && (
                             <span className="bg-orange-500/20 text-orange-500 px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest animate-pulse border border-orange-500/20">Awaiting Approval</span>
                           )}
@@ -241,18 +255,18 @@ export default function MyBookings() {
                           )}
                         </div>
                         <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs font-bold text-slate-400 uppercase tracking-widest">
-                          <span className="flex items-center gap-1"><MapPin size={14} className="text-lime" /> {booking.courtName}</span>
-                          <span className="flex items-center gap-1"><Clock size={14} /> {format(booking.startTime.toDate(), 'h:mm a')}</span>
-                          <span className="text-white/40">REF: {booking.bookingReference}</span>
+                          <span className="flex items-center gap-1"><MapPin size={14} className="text-lime" /> {booking.court_name}</span>
+                          <span className="flex items-center gap-1"><Clock size={14} /> {format(new Date(booking.start_time), 'h:mm a')}</span>
+                          <span className="text-white/40">REF: {booking.booking_reference}</span>
                         </div>
                       </div>
                     </div>
                     
                     <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto mt-4 sm:mt-0">
-                      {booking.status === 'RESERVED' && booking.expiresAt && (
+                      {booking.status === 'RESERVED' && booking.expires_at && (
                         <div className="flex items-center gap-4 w-full sm:w-auto">
                           <CountdownTimer 
-                            expiresAt={booking.expiresAt} 
+                            expiresAt={booking.expires_at} 
                             onExpire={() => handleCancel(booking.id)} 
                           />
                           <button 
@@ -309,8 +323,8 @@ export default function MyBookings() {
                  <tbody>
                     {past.map((booking) => (
                       <tr key={booking.id} className="border-b border-white/5 last:border-0 hover:bg-white/5 transition-colors">
-                        <td className="px-10 py-6 font-display font-black uppercase italic text-slate-300">{format(booking.startTime.toDate(), 'MMM dd, yyyy')}</td>
-                        <td className="px-10 py-6 text-slate-400 font-bold uppercase tracking-widest text-[10px]">{booking.facilityName}</td>
+                        <td className="px-10 py-6 font-display font-black uppercase italic text-slate-300">{format(new Date(booking.start_time), 'MMM dd, yyyy')}</td>
+                        <td className="px-10 py-6 text-slate-400 font-bold uppercase tracking-widest text-[10px]">{booking.facility_name}</td>
                         <td className="px-10 py-6">
                           <span className={`flex items-center gap-2 font-bold text-[10px] uppercase tracking-widest ${booking.status === 'CANCELLED' ? 'text-red-400' : booking.status === 'COMPLETED' ? 'text-lime' : 'text-slate-500'}`}>
                             {booking.status === 'CANCELLED' ? <XCircle size={12} /> : <CheckCircle2 size={12} />}
@@ -318,7 +332,7 @@ export default function MyBookings() {
                           </span>
                         </td>
                         <td className="px-10 py-6 text-right">
-                          {booking.status === 'COMPLETED' && !booking.hasReview && (
+                          {booking.status === 'COMPLETED' && !booking.has_review && (
                             <button 
                               onClick={() => setReviewingBooking(booking)}
                               className="bg-lime text-charcoal px-6 py-2 rounded-xl text-[10px] font-black uppercase italic hover:scale-105 transition-transform"
@@ -326,7 +340,7 @@ export default function MyBookings() {
                               Leave Review
                             </button>
                           )}
-                          {booking.hasReview && (
+                          {booking.has_review && (
                             <span className="text-white/20 text-[10px] uppercase font-bold tracking-widest italic flex items-center justify-end gap-1">
                               <Star size={10} fill="currentColor" /> Reviewed
                             </span>
@@ -372,8 +386,8 @@ export default function MyBookings() {
               <div className="space-y-8">
                 <header className="pr-12 sm:pr-0">
                   <div className="bg-lime/20 text-lime w-fit px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest mb-4">Post-Match Feedback</div>
-                  <h2 className="text-3xl sm:text-4xl font-display font-black uppercase italic tracking-tighter leading-none whitespace-normal break-words">{reviewingBooking.facilityName}</h2>
-                  <p className="text-slate-400 text-[10px] sm:text-xs font-bold uppercase tracking-widest mt-2">{reviewingBooking.courtName} • {format(reviewingBooking.startTime.toDate(), 'MMM dd')}</p>
+                  <h2 className="text-3xl sm:text-4xl font-display font-black uppercase italic tracking-tighter leading-none whitespace-normal break-words">{reviewingBooking.facility_name}</h2>
+                  <p className="text-slate-400 text-[10px] sm:text-xs font-bold uppercase tracking-widest mt-2">{reviewingBooking.court_name} • {format(new Date(reviewingBooking.start_time), 'MMM dd')}</p>
                 </header>
 
                 <form onSubmit={handleSubmitReview} className="space-y-8">

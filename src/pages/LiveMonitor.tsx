@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp, orderBy } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -23,12 +22,12 @@ import { toast } from 'sonner';
 
 interface Booking {
   id: string;
-  facilityId: string;
-  courtId: string;
-  courtName: string;
-  userName: string;
-  startTime: any;
-  endTime: any;
+  facility_id: string;
+  court_id: string;
+  court_name: string;
+  user_name: string;
+  start_time: string;
+  end_time: string;
   status: 'PENDING' | 'CONFIRMED' | 'CANCELLED' | 'IN_PROGRESS' | 'COMPLETED' | 'MAINTENANCE';
   source?: string;
 }
@@ -37,7 +36,7 @@ export default function LiveMonitor() {
   const { profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const facilityId = searchParams.get('facilityId') || profile?.facilityId;
+  const facilityId = searchParams.get('facilityId') || profile?.facility_id;
   
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [filterToday, setFilterToday] = useState(true);
@@ -51,29 +50,60 @@ export default function LiveMonitor() {
     }
 
     setLoading(true);
-    const q = query(
-      collection(db, 'bookings'),
-      where('facilityId', '==', facilityId),
-      orderBy('startTime', 'desc')
-    );
 
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Booking[];
-      setBookings(data);
+    const fetchBookings = async () => {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('facility_id', facilityId)
+        .order('start_time', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching bookings:', error);
+        toast.error('Failed to load feed.');
+      } else {
+        setBookings(data as Booking[]);
+      }
       setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'bookings');
-    });
+    };
 
-    return () => unsubscribe();
+    fetchBookings();
+
+    const channel = supabase
+      .channel('live_monitor_feed')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'bookings',
+        filter: `facility_id=eq.${facilityId}`
+      }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setBookings(prev => [payload.new as Booking, ...prev]);
+        } else if (payload.eventType === 'UPDATE') {
+          setBookings(prev => prev.map(b => b.id === payload.new.id ? payload.new as Booking : b));
+        } else if (payload.eventType === 'DELETE') {
+          setBookings(prev => prev.filter(b => b.id !== payload.old.id));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [facilityId, authLoading]);
 
   const handleUpdateStatus = async (bookingId: string, newStatus: string) => {
     try {
-      await updateDoc(doc(db, 'bookings', bookingId), {
-        status: newStatus,
-        updatedAt: serverTimestamp()
-      });
+      const { error } = await supabase
+        .from('bookings')
+        .update({
+          status: newStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', bookingId);
+
+      if (error) throw error;
+
       toast.success(`SYSTEM ACTION: Marking session as ${newStatus.replace('_', ' ').toUpperCase()}`, {
         icon: <ShieldCheck className="text-lime" />
       });
@@ -84,7 +114,7 @@ export default function LiveMonitor() {
   };
 
   const filteredBookings = filterToday 
-    ? bookings.filter(b => b.startTime?.toDate && isToday(b.startTime.toDate()))
+    ? bookings.filter(b => isToday(new Date(b.start_time)))
     : bookings;
 
   if (authLoading) {
@@ -174,8 +204,8 @@ export default function LiveMonitor() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 px-4 pb-20">
           <AnimatePresence mode="popLayout">
             {filteredBookings.length > 0 ? filteredBookings.map((booking) => {
-              const start = booking.startTime?.toDate ? booking.startTime.toDate() : new Date();
-              const end = booking.endTime?.toDate ? booking.endTime.toDate() : new Date();
+              const start = new Date(booking.start_time);
+              const end = new Date(booking.end_time);
               
               return (
                 <motion.div 
@@ -224,13 +254,13 @@ export default function LiveMonitor() {
                         <div className="space-y-1">
                            <p className="text-[11px] font-black text-lime uppercase tracking-[0.3em] leading-none mb-2">Primary Athlete</p>
                            <h4 className="text-4xl font-display font-black tracking-tighter text-white uppercase italic leading-none truncate pb-2">
-                            {booking.userName || 'GUEST'}
+                            {booking.user_name || 'GUEST'}
                           </h4>
                         </div>
                         <div className="space-y-1">
                            <p className="text-[11px] font-black text-slate-500 uppercase tracking-[0.3em] leading-none mb-2">Assigned Sector</p>
                            <p className="text-xl font-display font-black text-white/50 uppercase tracking-tighter italic">
-                            {booking.courtName}
+                            {booking.court_name}
                           </p>
                         </div>
                       </div>
@@ -346,12 +376,12 @@ export default function LiveMonitor() {
                 <div className="p-6 sm:p-8 glass rounded-[32px] sm:rounded-[40px] border-white/5 bg-white/[0.02] space-y-4">
                   <div className="flex justify-between text-[10px] font-black uppercase tracking-widest gap-4">
                     <span className="text-slate-500 shrink-0">Facility Location</span>
-                    <span className="text-white text-right whitespace-normal break-words">{selectedBooking.courtName}</span>
+                    <span className="text-white text-right whitespace-normal break-words">{selectedBooking.court_name}</span>
                   </div>
                   <div className="flex justify-between text-[10px] font-black uppercase tracking-widest gap-4">
                     <span className="text-slate-500 shrink-0">Scheduled Span</span>
                     <span className="text-white text-right whitespace-normal break-words">
-                      {format(selectedBooking.startTime.toDate(), 'hh:mm')} - {format(selectedBooking.endTime.toDate(), 'hh:mm a')}
+                      {format(new Date(selectedBooking.start_time), 'hh:mm')} - {format(new Date(selectedBooking.end_time), 'hh:mm a')}
                     </span>
                   </div>
                 </div>

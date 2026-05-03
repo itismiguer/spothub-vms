@@ -73,7 +73,7 @@ export const EarningsTab: React.FC<EarningsTabProps> = ({ bookings, loading }) =
 
           <div className="space-y-4">
              {confirmedBookings
-               .sort((a,b) => b.startTime.toMillis() - a.startTime.toMillis())
+               .sort((a,b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
                .map(booking => (
                 <div key={booking.id} className="flex items-center justify-between p-6 bg-white/5 rounded-3xl border border-white/5 hover:border-lime/20 transition-all group">
                    <div className="flex items-center gap-6">
@@ -81,9 +81,9 @@ export const EarningsTab: React.FC<EarningsTabProps> = ({ bookings, loading }) =
                          <Wallet size={20} />
                       </div>
                       <div>
-                         <p className="text-lg font-display font-black uppercase italic text-white leading-none">{booking.userName}</p>
+                         <p className="text-lg font-display font-black uppercase italic text-white leading-none">{booking.user_name}</p>
                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mt-1">
-                           {booking.startTime.toDate().toLocaleDateString()} • Receipt #{booking.id.slice(-6).toUpperCase()}
+                           {new Date(booking.start_time).toLocaleDateString()} • Receipt #{booking.id.slice(-6).toUpperCase()}
                          </p>
                       </div>
                    </div>

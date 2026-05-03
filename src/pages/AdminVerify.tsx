@@ -1,21 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, getDocs, doc, updateDoc, serverTimestamp, where, onSnapshot } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { Shield, FileText, CheckCircle, XCircle, Loader2, ArrowLeft, Building2, MapPin, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 interface UserProfile {
-  uid: string;
-  id?: string;
+  id: string;
   email: string;
   name: string;
   role: string;
-  businessName?: string;
-  businessAddress?: string;
-  kycUrl?: string;
-  verificationStatus?: 'pending' | 'verified' | 'rejected';
+  business_name?: string;
+  business_address?: string;
+  kyc_url?: string;
+  verification_status?: 'pending' | 'verified' | 'rejected';
 }
 
 export default function AdminVerify() {
@@ -25,37 +23,76 @@ export default function AdminVerify() {
   const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
-    // Real-time listener for pending verifications
-    const q = query(collection(db, 'users'), where('verificationStatus', '==', 'pending'));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })) as UserProfile[]);
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'users_verification');
-      setLoading(false);
-    });
+    const fetchPendingUsers = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('verification_status', 'pending');
 
-    return () => unsubscribe();
+      if (error) {
+        console.error('Error fetching profiles:', error);
+        toast.error('Failed to load pending verifications.');
+      } else {
+        setUsers(data as UserProfile[]);
+      }
+      setLoading(false);
+    };
+
+    fetchPendingUsers();
+
+    const channel = supabase
+      .channel('admin_verify_feed')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'profiles',
+        filter: 'verification_status=eq.pending'
+      }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setUsers(prev => [payload.new as UserProfile, ...prev]);
+        } else if (payload.eventType === 'UPDATE') {
+          if (payload.new.verification_status !== 'pending') {
+            setUsers(prev => prev.filter(u => u.id !== payload.new.id));
+          } else {
+            setUsers(prev => prev.map(u => u.id === payload.new.id ? payload.new as UserProfile : u));
+          }
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleVerify = async (uid: string, status: 'verified' | 'rejected') => {
     setIsUpdating(true);
     try {
-      await updateDoc(doc(db, 'users', uid), { 
-        verificationStatus: status,
-        verifiedAt: serverTimestamp()
-      });
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ 
+          verification_status: status,
+          verified_at: new Date().toISOString()
+        })
+        .eq('id', uid);
+
+      if (profileError) throw profileError;
 
       // Synchronize facility verification
-      const fSnap = await getDocs(query(collection(db, 'facilities'), where('ownerId', '==', uid)));
-      const facilityPromises = fSnap.docs.map(d => updateDoc(d.ref, { 
-        isVerified: status === 'verified',
-        verificationStatus: status 
-      }));
-      await Promise.all(facilityPromises);
+      const { error: facilityError } = await supabase
+        .from('facilities')
+        .update({ 
+          is_verified: status === 'verified',
+          verification_status: status 
+        })
+        .eq('owner_id', uid);
+
+      if (facilityError) throw facilityError;
 
       toast.success(`Account ${status === 'verified' ? 'Approved' : 'Rejected'}`);
     } catch (error) {
+      console.error('Verification error:', error);
       toast.error('Failed to update status.');
     } finally {
       setIsUpdating(false);
@@ -100,7 +137,7 @@ export default function AdminVerify() {
         <AnimatePresence mode="popLayout">
           {users.map((u) => (
             <motion.div 
-              key={u.id || u.uid}
+              key={u.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -122,14 +159,14 @@ export default function AdminVerify() {
                       <div className="w-10 h-10 glass rounded-xl flex items-center justify-center text-white/20"><Building2 size={18} /></div>
                       <div>
                          <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest leading-none mb-1">Business Name</p>
-                         <p className="text-xs font-bold text-slate-300">{u.businessName || 'N/A'}</p>
+                         <p className="text-xs font-bold text-slate-300">{u.business_name || 'N/A'}</p>
                       </div>
                    </div>
                    <div className="flex items-start gap-4">
                       <div className="w-10 h-10 glass rounded-xl flex items-center justify-center text-white/20"><MapPin size={18} /></div>
                       <div>
                          <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest leading-none mb-1">Registered Address</p>
-                         <p className="text-xs font-bold text-slate-300 line-clamp-1">{u.businessAddress || 'N/A'}</p>
+                         <p className="text-xs font-bold text-slate-300 line-clamp-1">{u.business_address || 'N/A'}</p>
                       </div>
                    </div>
                  </div>
@@ -138,9 +175,9 @@ export default function AdminVerify() {
               <div className="lg:w-80 flex flex-col justify-end gap-6 border-l lg:border-l border-white/5 lg:pl-12">
                  <div className="space-y-3">
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center lg:text-left">Legal Evidence</p>
-                    {u.kycUrl ? (
+                    {u.kyc_url ? (
                       <button 
-                        onClick={() => window.open(u.kycUrl, '_blank')}
+                        onClick={() => window.open(u.kyc_url, '_blank')}
                         className="w-full h-40 glass rounded-[32px] border-white/10 flex flex-col items-center justify-center gap-3 group/btn hover:border-lime/40 transition-all relative overflow-hidden"
                       >
                          <div className="absolute inset-0 bg-lime/10 opacity-0 group-hover/btn:opacity-100 transition-opacity" />
@@ -159,14 +196,14 @@ export default function AdminVerify() {
                  <div className="flex gap-4">
                     <button 
                       disabled={isUpdating}
-                      onClick={() => handleVerify(u.id || u.uid, 'rejected')}
+                      onClick={() => handleVerify(u.id, 'rejected')}
                       className="flex-1 py-5 glass border-red-500/20 text-red-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-500/10 transition-all"
                     >
                        Reject
                     </button>
                     <button 
-                      disabled={isUpdating || !u.kycUrl}
-                      onClick={() => handleVerify(u.id || u.uid, 'verified')}
+                      disabled={isUpdating || !u.kyc_url}
+                      onClick={() => handleVerify(u.id, 'verified')}
                       className="flex-1 py-5 bg-lime text-charcoal rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-lime/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
                     >
                        Approve

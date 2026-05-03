@@ -30,7 +30,7 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
   // Let's assume the useAuth hook might be needed if not passed.
   // But for simple override, we can check if approved state is reachable.
   
-  const sortedBookings = [...bookings].sort((a, b) => b.startTime.toMillis() - a.startTime.toMillis());
+  const sortedBookings = [...bookings].sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime());
 
   return (
     <div className="space-y-8">
@@ -74,12 +74,12 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <p className="text-xl font-display font-black uppercase italic text-white leading-none">
-                      {(booking as any).source === 'manual' ? 'Manual Entry' : (booking.userName || 'Anonymous Player')}
+                      {(booking as any).source === 'manual' ? 'Manual Entry' : (booking.user_name || 'Anonymous Player')}
                     </p>
                     {booking.status === 'PENDING' && <span className="bg-orange-500 animate-pulse w-2 h-2 rounded-full" />}
                   </div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                    {courts.find(c => c.id === booking.courtId)?.name || 'Unknown Court'} • {format(booking.startTime.toDate(), 'MMM dd, h:mm a')} - {format(booking.endTime.toDate(), 'h:mm a')}
+                    {courts.find(c => c.id === booking.court_id)?.name || 'Unknown Court'} • {format(new Date(booking.start_time), 'MMM dd, h:mm a')} - {format(new Date(booking.end_time), 'h:mm a')}
                   </p>
                 </div>
               </div>

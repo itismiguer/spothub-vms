@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, getDocs, doc, updateDoc, getDoc, addDoc, serverTimestamp, where, limit, setDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { Shield, Users, Building2, TrendingUp, Search, MoreVertical, CheckCircle, XCircle, Database, Loader2, Star, Eye, EyeOff, MessageCircle, Settings, Plus, ShieldCheck, FileText, ChevronDown, Bell, Clock, ShieldAlert } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
@@ -10,35 +9,36 @@ import { useAuth } from '../contexts/AuthContext';
 import Selector from '../components/Selector';
 
 interface UserProfile {
-  uid: string;
+  id: string;
   email: string;
   name: string;
   role: string;
-  businessName?: string;
-  businessAddress?: string;
-  kycUrl?: string;
-  verificationStatus?: 'pending' | 'verified' | 'rejected';
+  business_name?: string;
+  business_address?: string;
+  kyc_url?: string;
+  verification_status?: 'pending' | 'verified' | 'rejected';
 }
 
 interface Facility {
   id: string;
   name: string;
   type: string;
-  ownerId: string;
+  owner_id: string;
   address?: string;
-  createdAt?: any;
+  created_at?: string;
+  isActive?: boolean;
 }
 
 interface Review {
   id: string;
-  facilityId: string;
-  facilityName?: string;
-  userName: string;
+  facility_id: string;
+  facility_name?: string;
+  user_name: string;
   rating: number;
   comment: string;
   hidden: boolean;
-  createdAt: any;
-  ownerReply?: { text: string; updatedAt: any };
+  created_at: string;
+  owner_reply?: { text: string; updated_at: string };
 }
 
 interface SystemSettings {
@@ -47,13 +47,13 @@ interface SystemSettings {
 
 interface Booking {
   id: string;
-  facilityId: string;
-  courtName: string;
-  userName: string;
-  startTime: any;
-  endTime: any;
+  facility_id: string;
+  court_name: string;
+  user_name: string;
+  start_time: string;
+  end_time: string;
   status: string;
-  bookingReference: string;
+  booking_reference: string;
 }
 
 export default function AdminDashboard() {
@@ -61,7 +61,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'facilities' | 'reviews' | 'verification' | 'settings' | 'bookings' | 'notifications'>('overview');
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [facilities, setFacilities] = useState<any[]>([]);
+  const [facilities, setFacilities] = useState<Facility[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -77,7 +77,12 @@ export default function AdminDashboard() {
   const handleToggleGlobalSms = async () => {
     try {
       const newValue = !systemSettings.global_sms_enabled;
-      await updateDoc(doc(db, 'system_settings', 'global'), { global_sms_enabled: newValue, updatedAt: serverTimestamp() });
+      const { error } = await supabase
+        .from('system_settings')
+        .update({ global_sms_enabled: newValue, updated_at: new Date().toISOString() })
+        .eq('id', 'global');
+      
+      if (error) throw error;
       setSystemSettings({ ...systemSettings, global_sms_enabled: newValue });
       toast.success(`Global SMS ${newValue ? 'Enabled' : 'Disabled'}`, {
         icon: newValue ? '💬' : '🔇'
@@ -89,7 +94,12 @@ export default function AdminDashboard() {
 
   const handleToggleFacilityStatus = async (facId: string, currentStatus: boolean) => {
     try {
-      await updateDoc(doc(db, 'facilities', facId), { isActive: !currentStatus });
+      const { error } = await supabase
+        .from('facilities')
+        .update({ is_active: !currentStatus })
+        .eq('id', facId);
+      
+      if (error) throw error;
       setFacilities(prev => prev.map(f => f.id === facId ? { ...f, isActive: !currentStatus } : f));
       toast.success(`Facility ${!currentStatus ? 'Activated' : 'Locked Down'}`);
     } catch (error) {
@@ -99,19 +109,23 @@ export default function AdminDashboard() {
 
   const handleBookingManualStatus = async (bookingId: string, newStatus: string) => {
     try {
-      await updateDoc(doc(db, 'bookings', bookingId), { status: newStatus, manualOverride: true, overridenBy: user?.uid });
+      const { error } = await supabase
+        .from('bookings')
+        .update({ status: newStatus, manual_override: true, overridden_by: user?.id })
+        .eq('id', bookingId);
+      
+      if (error) throw error;
       setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: newStatus } : b));
       
       const targetBooking = bookings.find(b => b.id === bookingId);
-      if (targetBooking && (targetBooking as any).userId) {
-        await addDoc(collection(db, 'notifications'), {
-          userId: (targetBooking as any).userId,
+      if (targetBooking && (targetBooking as any).user_id) {
+        await supabase.from('notifications').insert({
+          user_id: (targetBooking as any).user_id,
           title: `Booking ${newStatus}`,
-          message: `Your reservation ${targetBooking.bookingReference} status has been updated to ${newStatus} by the Super Admin.`,
+          message: `Your reservation ${targetBooking.booking_reference} status has been updated to ${newStatus} by the Super Admin.`,
           type: newStatus === 'CONFIRMED' ? 'booking_confirmed' : 'booking_expired',
           read: false,
-          createdAt: serverTimestamp(),
-          relatedId: bookingId
+          related_id: bookingId
         });
       }
 
@@ -121,25 +135,31 @@ export default function AdminDashboard() {
     }
   };
 
-  // Helper variables for verification
-  const pendingVerificationUsers = users.filter(u => u.verificationStatus === 'pending');
+  const pendingVerificationUsers = users.filter(u => u.verification_status === 'pending');
 
   const handleVerifyUser = async (uid: string, status: 'verified' | 'rejected') => {
     try {
-      await updateDoc(doc(db, 'users', uid), { 
-        verificationStatus: status,
-        verifiedAt: serverTimestamp()
-      });
+      const { error: userError } = await supabase
+        .from('profiles')
+        .update({ 
+          verification_status: status,
+          verified_at: new Date().toISOString()
+        })
+        .eq('id', uid);
+      
+      if (userError) throw userError;
 
-      // Also update all facilities owned by this user to reflect verification
-      const fSnap = await getDocs(query(collection(db, 'facilities'), where('ownerId', '==', uid)));
-      const facilityPromises = fSnap.docs.map(d => updateDoc(d.ref, { 
-        isVerified: status === 'verified' ? true : false,
-        verificationStatus: status 
-      }));
-      await Promise.all(facilityPromises);
+      const { error: facError } = await supabase
+        .from('facilities')
+        .update({ 
+          is_verified: status === 'verified',
+          verification_status: status 
+        })
+        .eq('owner_id', uid);
+        
+      if (facError) throw facError;
 
-      setUsers(prev => prev.map(u => u.uid === uid ? { ...u, verificationStatus: status } : u));
+      setUsers(prev => prev.map(u => u.id === uid ? { ...u, verification_status: status } : u));
       toast.success(`User verification: ${status.toUpperCase()}`);
     } catch (error) {
       console.error("Verification update error:", error);
@@ -147,52 +167,41 @@ export default function AdminDashboard() {
     }
   };
 
-  // Facility Registration Form State
   const [newFac, setNewFac] = useState({ name: '', type: 'Pickleball', ownerId: '', address: '', lat: 9.3068, lng: 123.3039 });
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const uSnap = await getDocs(collection(db, 'users'));
-      setUsers(uSnap.docs.map(d => d.data()) as UserProfile[]);
+      const { data: usersData } = await supabase.from('profiles').select('*');
+      setUsers(usersData as UserProfile[] || []);
 
-      const fSnap = await getDocs(collection(db, 'facilities'));
-      const facilitiesData = fSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
-      setFacilities(facilitiesData);
+      const { data: facilitiesData } = await supabase.from('facilities').select('*');
+      setFacilities(facilitiesData as Facility[] || []);
 
-      const rSnap = await getDocs(collection(db, 'reviews'));
-      const reviewsData = rSnap.docs.map(d => {
-        const data = d.data();
-        const facility = facilitiesData.find(f => f.id === data.facilityId);
-        return { 
-          id: d.id, 
-          ...data,
-          facilityName: facility?.name || 'Unknown Facility'
-        } as Review;
-      });
-      setReviews(reviewsData.sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis()));
+      const { data: reviewsData } = await supabase.from('reviews').select('*');
+      const formattedReviews = (reviewsData || []).map(r => ({
+        ...r,
+        facility_name: facilitiesData?.find(f => f.id === r.facility_id)?.name || 'Unknown Facility'
+      }));
+      setReviews(formattedReviews.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
 
-      // Fetch System Settings
-      const settingsSnap = await getDoc(doc(db, 'system_settings', 'global'));
-      if (settingsSnap.exists()) {
-        setSystemSettings(settingsSnap.data() as SystemSettings);
+      const { data: settingsData } = await supabase.from('system_settings').select('*').eq('id', 'global').single();
+      if (settingsData) {
+        setSystemSettings(settingsData as SystemSettings);
       } else {
-        // Init with specific ID 'global' if not exists
-        const initialSettings = { global_sms_enabled: true, updatedAt: serverTimestamp() };
-        await setDoc(doc(db, 'system_settings', 'global'), initialSettings);
+        const initialSettings = { id: 'global', global_sms_enabled: true };
+        await supabase.from('system_settings').insert(initialSettings);
         setSystemSettings(initialSettings as any);
       }
 
-      // Fetch All Bookings for Override Control
-      const bSnap = await getDocs(collection(db, 'bookings'));
-      setBookings(bSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Booking[]);
+      const { data: bookingData } = await supabase.from('bookings').select('*');
+      setBookings(bookingData as Booking[] || []);
 
-      // Fetch Global Notifications for Oversight
-      const nSnap = await getDocs(query(collection(db, 'notifications'), limit(50)));
-      setNotifications(nSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const { data: notificationsData } = await supabase.from('notifications').select('*').limit(50);
+      setNotifications(notificationsData || []);
 
     } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, 'admin_data');
+      console.error("Admin data fetch error:", error);
     } finally {
       setLoading(false);
     }
@@ -208,9 +217,9 @@ export default function AdminDashboard() {
     if (!user) return;
     setIsSeeding(true);
     try {
-      await seedDemoData(user.email || '', user.uid);
+      await seedDemoData(user.email || '', user.id);
       toast.success('Demo data initialized successfully!');
-      fetchData(); // Refresh list
+      fetchData();
     } catch (error) {
       toast.error('Failed to initialize demo data.');
     } finally {
@@ -222,13 +231,18 @@ export default function AdminDashboard() {
     e.preventDefault();
     setIsRegistering(true);
     try {
-      await addDoc(collection(db, 'facilities'), {
-        ...newFac,
-        isVerified: true,
-        verificationStatus: 'verified',
-        images: ['https://images.unsplash.com/photo-1599586120429-48281b6f0ece?auto=format&fit=crop&q=80&w=800'],
-        createdAt: serverTimestamp(),
+      const { error } = await supabase.from('facilities').insert({
+        name: newFac.name,
+        type: newFac.type,
+        owner_id: newFac.ownerId,
+        address: newFac.address,
+        latitude: newFac.lat,
+        longitude: newFac.lng,
+        is_verified: true,
+        verification_status: 'verified',
+        images: ['https://images.unsplash.com/photo-1599586120429-48281b6f0ece?auto=format&fit=crop&q=80&w=800']
       });
+      if (error) throw error;
       toast.success('New facility registered successfully.');
       setNewFac({ name: '', type: 'Pickleball', ownerId: '', address: '', lat: 9.3068, lng: 123.3039 });
       fetchData();
@@ -241,8 +255,9 @@ export default function AdminDashboard() {
 
   const handleRoleChange = async (uid: string, newRole: string) => {
     try {
-      await updateDoc(doc(db, 'users', uid), { role: newRole });
-      setUsers(prev => prev.map(u => u.uid === uid ? { ...u, role: newRole } : u));
+      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', uid);
+      if (error) throw error;
+      setUsers(prev => prev.map(u => u.id === uid ? { ...u, role: newRole } : u));
       toast.success(`User role updated to ${newRole}`);
     } catch (error) {
       toast.error('Failed to update role.');
@@ -251,7 +266,8 @@ export default function AdminDashboard() {
 
   const handleToggleReviewVisibility = async (reviewId: string, currentHidden: boolean) => {
     try {
-      await updateDoc(doc(db, 'reviews', reviewId), { hidden: !currentHidden });
+      const { error } = await supabase.from('reviews').update({ hidden: !currentHidden }).eq('id', reviewId);
+      if (error) throw error;
       setReviews(prev => prev.map(r => r.id === reviewId ? { ...r, hidden: !currentHidden } : r));
       toast.success(`Review ${!currentHidden ? 'hidden' : 'visible'}`);
     } catch (error) {
@@ -414,8 +430,8 @@ export default function AdminDashboard() {
                   {bookings.map((booking) => (
                     <tr key={booking.id} className="hover:bg-white/5 transition-colors group">
                       <td className="px-10 py-6">
-                        <div className="font-display font-black uppercase italic text-lg leading-none group-hover:text-cyan transition-colors">{booking.userName}</div>
-                        <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">{booking.courtName} • {booking.bookingReference}</div>
+                        <div className="font-display font-black uppercase italic text-lg leading-none group-hover:text-cyan transition-colors">{booking.user_name}</div>
+                        <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">{booking.court_name} • {booking.booking_reference}</div>
                       </td>
                       <td className="px-10 py-6">
                          <div className="flex items-center gap-3">
@@ -526,7 +542,7 @@ export default function AdminDashboard() {
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {users.filter(u => u.email.includes(searchTerm)).map((user) => (
-                    <tr key={user.uid} className="hover:bg-white/5 transition-colors group">
+                    <tr key={user.id} className="hover:bg-white/5 transition-colors group">
                       <td className="px-10 py-6">
                         <div className="font-display font-black uppercase italic text-lg leading-none group-hover:text-cyan transition-colors">{user.name}</div>
                         <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">{user.email}</div>
@@ -541,7 +557,7 @@ export default function AdminDashboard() {
                         </span>
                       </td>
                       <td className="px-10 py-6 text-right">
-                        <select className="bg-white/5 p-3 rounded-xl text-[10px] uppercase font-bold text-white focus:text-white outline-none cursor-pointer tracking-widest" value={user.role} onChange={(e) => handleRoleChange(user.uid, e.target.value)}>
+                        <select className="bg-white/5 p-3 rounded-xl text-[10px] uppercase font-bold text-white focus:text-white outline-none cursor-pointer tracking-widest" value={user.role} onChange={(e) => handleRoleChange(user.id, e.target.value)}>
                           <option value="PLAYER" className="bg-charcoal text-white">Standard</option>
                           <option value="OWNER" className="bg-charcoal text-white">Operator</option>
                           <option value="ADMIN" className="bg-charcoal text-white">Admin</option>
@@ -617,7 +633,7 @@ export default function AdminDashboard() {
               {reviews.map((review) => (
                 <div key={review.id} className={`glass p-10 rounded-[56px] border-white/5 transition-all flex flex-col md:flex-row gap-10 items-start ${review.hidden ? 'opacity-40 grayscale' : ''}`}>
                   <div className="md:w-64 space-y-4">
-                    <div className="text-white font-display font-black uppercase italic text-2xl group-hover:text-lime transition-colors leading-tight">{review.userName}</div>
+                    <div className="text-white font-display font-black uppercase italic text-2xl group-hover:text-lime transition-colors leading-tight">{review.user_name}</div>
                     <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest px-3 py-1 bg-white/5 rounded-full border border-white/5 w-fit">PID: {review.id.slice(0, 8)}</div>
                     <div className="flex gap-1">
                       {[...Array(5)].map((_, i) => (
@@ -628,13 +644,13 @@ export default function AdminDashboard() {
 
                   <div className="flex-1 space-y-6 border-l border-white/5 pl-10">
                     <div className="space-y-2">
-                       <span className="text-[9px] font-black uppercase tracking-widest text-lime/50">{review.facilityName}</span>
+                       <span className="text-[9px] font-black uppercase tracking-widest text-lime/50">{review.facility_name}</span>
                        <p className="text-lg font-medium text-slate-300 leading-relaxed italic">"{review.comment}"</p>
                     </div>
-                    {review.ownerReply && (
+                    {review.owner_reply && (
                       <div className="bg-white/5 p-6 rounded-3xl border border-white/10 space-y-2">
                          <span className="text-[9px] font-black uppercase tracking-widest text-white/20">System Response</span>
-                         <p className="text-sm text-slate-400 italic">"{review.ownerReply.text}"</p>
+                         <p className="text-sm text-slate-400 italic">"{review.owner_reply.text}"</p>
                       </div>
                     )}
                   </div>
@@ -688,20 +704,20 @@ export default function AdminDashboard() {
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {pendingVerificationUsers.length > 0 ? pendingVerificationUsers.map((u) => (
-                        <tr key={u.uid} className="hover:bg-white/5 transition-colors group">
+                        <tr key={u.id} className="hover:bg-white/5 transition-colors group">
                           <td className="px-10 py-6">
                             <div className="font-display font-black uppercase italic text-lg leading-none">{u.name}</div>
                             <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">{u.email}</div>
-                            {u.businessName && (
-                              <div className="text-[10px] text-lime font-bold uppercase tracking-widest mt-2">{u.businessName}</div>
+                            {u.business_name && (
+                              <div className="text-[10px] text-lime font-bold uppercase tracking-widest mt-2">{u.business_name}</div>
                             )}
-                            {u.businessAddress && (
-                              <div className="text-[10px] text-slate-600 font-bold uppercase tracking-widest mt-1">{u.businessAddress}</div>
+                            {u.business_address && (
+                              <div className="text-[10px] text-slate-600 font-bold uppercase tracking-widest mt-1">{u.business_address}</div>
                             )}
                           </td>
                           <td className="px-10 py-6">
-                            {u.kycUrl ? (
-                              <a href={u.kycUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-lime hover:underline font-bold text-[10px] uppercase tracking-widest translate-y-[-8px]">
+                            {u.kyc_url ? (
+                              <a href={u.kyc_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-lime hover:underline font-bold text-[10px] uppercase tracking-widest translate-y-[-8px]">
                                 <FileText size={14} />
                                 View Evidence
                               </a>
@@ -711,13 +727,13 @@ export default function AdminDashboard() {
                           </td>
                           <td className="px-10 py-6 text-right space-x-4">
                             <button 
-                              onClick={() => handleVerifyUser(u.uid, 'verified')}
+                              onClick={() => handleVerifyUser(u.id, 'verified')}
                               className="px-6 py-2 bg-lime/20 text-lime border border-lime/20 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-lime hover:text-charcoal transition-all"
                             >
                               Approve
                             </button>
                             <button 
-                              onClick={() => handleVerifyUser(u.uid, 'rejected')}
+                              onClick={() => handleVerifyUser(u.id, 'rejected')}
                               className="px-6 py-2 bg-red-500/10 text-red-500 border border-red-500/10 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all"
                             >
                               Reject
@@ -760,14 +776,14 @@ export default function AdminDashboard() {
                     <div className="space-y-1">
                       <div className="flex items-center gap-3">
                         <h4 className="text-[11px] font-black uppercase tracking-wider text-white">{n.title}</h4>
-                        <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest px-2 py-0.5 border border-white/5 rounded-full">UID: {n.userId?.slice(0, 8)}</span>
+                        <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest px-2 py-0.5 border border-white/5 rounded-full">UID: {n.user_id?.slice(0, 8)}</span>
                       </div>
                       <p className="text-xs text-slate-400 font-medium">{n.message}</p>
                     </div>
                   </div>
                   <div className="text-right">
                     <p className="text-[9px] font-black uppercase tracking-widest text-slate-600">
-                      {n.createdAt?.toMillis ? new Date(n.createdAt.toMillis()).toLocaleString() : 'Recent'}
+                      {n.created_at ? new Date(n.created_at).toLocaleString() : 'Recent'}
                     </p>
                     <span className={`text-[8px] font-black uppercase tracking-widest p-1 px-2 rounded-md mt-2 inline-block ${n.read ? 'bg-white/5 text-slate-600' : 'bg-cyan/20 text-cyan'}`}>
                       {n.read ? 'ACKNOWLEDGED' : 'ACTIVE'}

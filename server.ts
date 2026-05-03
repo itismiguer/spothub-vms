@@ -2,8 +2,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
-import { initializeApp } from "firebase/app";
-import { getFirestore, collection, query, where, onSnapshot, getDoc, doc, updateDoc, Timestamp, getDocs } from "firebase/firestore";
+import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 import twilio from "twilio";
 import fs from "fs";
@@ -11,10 +10,10 @@ import fs from "fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load Firebase Config
-const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), "firebase-applet-config.json"), "utf8"));
-const app_firebase = initializeApp(firebaseConfig);
-const db = getFirestore(app_firebase, firebaseConfig.firestoreDatabaseId);
+// Initialize Supabase (Prefer service role for backend triggers)
+const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Initialize Notification Services
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
@@ -33,63 +32,53 @@ async function startServer() {
     res.json({ status: "ok", notifications: !!resend && !!twilioClient });
   });
 
-  // Automated Notification System Triggers
+  // Automated Notification System Triggers (Supabase Realtime)
   
-  // 1. Booking Triggers (Email)
-  onSnapshot(collection(db, "bookings"), async (snapshot) => {
-    snapshot.docChanges().forEach(async (change) => {
-      if (change.type === "added") {
-        const booking = change.doc.data();
-        // Check if it's a new request
-        if (booking.status === "PENDING" && !booking.notifiedRequest) {
-          console.log(`New booking request: ${change.doc.id}`);
-          sendBookingEmails(change.doc.id, booking);
-          await updateDoc(change.doc.ref, { notifiedRequest: true });
+  // 1. Booking Triggers
+  supabase
+    .channel('booking_notifications')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, async (payload) => {
+      if (payload.eventType === 'INSERT') {
+        const booking = payload.new;
+        if (booking.status === 'PENDING' && !booking.notified_request) {
+          console.log(`New booking request: ${booking.id}`);
+          await sendBookingEmails(booking.id, booking);
+          await supabase.from('bookings').update({ notified_request: true }).eq('id', booking.id);
         }
-      } else if (change.type === "modified") {
-        const booking = change.doc.data();
-        if ((booking.status === "CONFIRMED" || booking.status === "CANCELLED") && !booking.notifiedResponse) {
-          console.log(`Booking status update: ${change.doc.id} -> ${booking.status}`);
-          sendResponseEmail(change.doc.id, booking);
-          await updateDoc(change.doc.ref, { notifiedResponse: true });
+      } else if (payload.eventType === 'UPDATE') {
+        const booking = payload.new;
+        if ((booking.status === 'CONFIRMED' || booking.status === 'CANCELLED') && !booking.notified_response) {
+          console.log(`Booking status update: ${booking.id} -> ${booking.status}`);
+          await sendResponseEmail(booking.id, booking);
+          await supabase.from('bookings').update({ notified_response: true }).eq('id', booking.id);
         }
       }
-    });
-  });
+    })
+    .subscribe();
 
-  // 2. Weather Closure Triggers (SMS)
-  onSnapshot(collection(db, "facilities"), async (snapshot) => {
-    snapshot.docChanges().forEach(async (change) => {
-      if (change.type === "modified") {
-        const facility = change.doc.data();
-        const oldFacility = change.doc.data(); // This is wrong in client SDK onSnapshot, it doesn't give old data easily
-        // We'll use a specific trigger field: weatherAlertBroadcastedAt
-        if (facility.triggerWeatherAlert && (!facility.lastWeatherAlertAt || facility.triggerWeatherAlert > (facility.lastWeatherAlertAt || 0))) {
-          console.log(`Weather Alert triggered for: ${facility.name}`);
-          triggerCriticalSMS(change.doc.id, facility);
-          await updateDoc(change.doc.ref, { 
-            lastWeatherAlertAt: facility.triggerWeatherAlert,
-            triggerWeatherAlert: null // Reset trigger
-          });
-        }
+  // 2. Weather Closure Triggers
+  supabase
+    .channel('weather_alerts')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'facilities' }, async (payload) => {
+      const facility = payload.new;
+      if (facility.trigger_weather_alert && (!facility.last_weather_alert_at || facility.trigger_weather_alert > facility.last_weather_alert_at)) {
+        console.log(`Weather Alert triggered for: ${facility.name}`);
+        await triggerCriticalSMS(facility.id, facility);
+        await supabase.from('facilities').update({ 
+          last_weather_alert_at: facility.trigger_weather_alert,
+          trigger_weather_alert: null 
+        }).eq('id', facility.id);
       }
-    });
-  });
+    })
+    .subscribe();
 
   async function sendBookingEmails(id: string, booking: any) {
     if (!resend) return;
     try {
-      // Fetch User & Owner
-      const playerSnap = await getDoc(doc(db, "users", booking.userId));
-      const player = playerSnap.data();
-      
-      const facilitySnap = await getDoc(doc(db, "facilities", booking.facilityId));
-      const facility = facilitySnap.data();
-      
-      const ownerSnap = await getDoc(doc(db, "users", facility?.ownerId));
-      const owner = ownerSnap.data();
+      const { data: player } = await supabase.from('users').select('*').eq('id', booking.user_id).single();
+      const { data: facility } = await supabase.from('facilities').select('*').eq('id', booking.facility_id).single();
+      const { data: owner } = await supabase.from('users').select('*').eq('id', facility?.owner_id).single();
 
-      // Email to Player
       if (player?.email && player?.notifications?.email !== false) {
         await resend.emails.send({
           from: 'CourtReserve <notifications@builtbymiguel.net>',
@@ -99,7 +88,6 @@ async function startServer() {
         });
       }
 
-      // Email to Owner
       if (owner?.email && owner?.notifications?.email !== false) {
         await resend.emails.send({
           from: 'CourtReserve <admin@builtbymiguel.net>',
@@ -114,10 +102,8 @@ async function startServer() {
   async function sendResponseEmail(id: string, booking: any) {
     if (!resend) return;
     try {
-      const playerSnap = await getDoc(doc(db, "users", booking.userId));
-      const player = playerSnap.data();
-      const facilitySnap = await getDoc(doc(db, "facilities", booking.facilityId));
-      const facility = facilitySnap.data();
+      const { data: player } = await supabase.from('users').select('*').eq('id', booking.user_id).single();
+      const { data: facility } = await supabase.from('facilities').select('*').eq('id', booking.facility_id).single();
 
       if (player?.email && player?.notifications?.email !== false) {
         await resend.emails.send({
@@ -145,31 +131,28 @@ async function startServer() {
   async function triggerCriticalSMS(facilityId: string, facility: any) {
     if (!twilioClient) return;
     try {
-      // Global SMS Lockdown Check
-      const settingsSnap = await getDoc(doc(db, "system_settings", "global"));
-      if (settingsSnap.exists() && settingsSnap.data().global_sms_enabled === false) {
+      const { data: settings } = await supabase.from('system_settings').select('*').eq('id', 'global').single();
+      if (settings && settings.global_sms_enabled === false) {
         console.log("SMS Transmission Blocked: Global System Lockdown Active.");
         return;
       }
 
-      // Find all CONFIRMED bookings in the next 4 hours
-      const now = Timestamp.now();
-      const fourHoursLater = new Timestamp(now.seconds + 4 * 3600, 0);
+      const now = new Date().toISOString();
+      const fourHoursLater = new Date(Date.now() + 4 * 3600 * 1000).toISOString();
       
-      const q = query(collection(db, "bookings"), 
-        where("facilityId", "==", facilityId),
-        where("status", "==", "CONFIRMED"),
-        where("startTime", ">=", now),
-        where("startTime", "<=", fourHoursLater)
-      );
+      const { data: bookingsDoc } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('facility_id', facilityId)
+        .eq('status', 'CONFIRMED')
+        .gte('start_time', now)
+        .lte('start_time', fourHoursLater);
       
-      const snap = await getDocs(q);
-      console.log(`Sending SMS to ${snap.size} players...`);
+      if (!bookingsDoc) return;
+      console.log(`Sending SMS to ${bookingsDoc.length} players...`);
 
-      for (const bookingDoc of snap.docs) {
-        const booking = bookingDoc.data();
-        const playerSnap = await getDoc(doc(db, "users", booking.userId));
-        const player = playerSnap.data();
+      for (const booking of bookingsDoc) {
+        const { data: player } = await supabase.from('users').select('*').eq('id', booking.user_id).single();
 
         if (player?.phone && player.notifications?.sms === true) {
           await twilioClient.messages.create({
@@ -181,6 +164,35 @@ async function startServer() {
         }
       }
     } catch (e) { console.error("SMS error:", e); }
+  }
+
+  // 3. Chat Notifications
+  supabase
+    .channel('chat_notifications')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chats' }, async (payload) => {
+      const chat = payload.new;
+      if ((chat.unread_count_owner || 0) > 0 || (chat.unread_count_player || 0) > 0) {
+        console.log(`Unread message in chat: ${chat.id}`);
+        await sendChatAlert(chat.id, chat);
+      }
+    })
+    .subscribe();
+
+  async function sendChatAlert(chatId: string, chat: any) {
+    if (!resend) return;
+    try {
+      const recipientId = (chat.unread_count_owner || 0) > 0 ? chat.facility_owner_id : chat.player_id;
+      const { data: recipient } = await supabase.from('users').select('*').eq('id', recipientId).single();
+
+      if (recipient?.email && recipient?.notifications?.email !== false) {
+        await resend.emails.send({
+          from: 'CourtReserve <messages@builtbymiguel.net>',
+          to: recipient.email,
+          subject: 'New Message Received',
+          html: `<h1>New Message</h1><p>You have a new message regarding <strong>${chat.facility_name}</strong>.</p><p>"${chat.last_message}"</p><a href="https://builtbymiguel.net/messages">View in App</a>`
+        });
+      }
+    } catch (e) { console.error("Chat alert error:", e); }
   }
 
   // Vite Middleware
@@ -196,39 +208,6 @@ async function startServer() {
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
-  }
-
-  // 3. Chat Notifications (Email fallback for offline)
-  onSnapshot(collection(db, "chats"), async (snapshot) => {
-    snapshot.docChanges().forEach(async (change) => {
-      if (change.type === "modified") {
-        const chat = change.doc.data();
-        // If unread count increased, send alert
-        if ((chat.unreadCountOwner || 0) > 0 || (chat.unreadCountPlayer || 0) > 0) {
-           console.log(`Unread message in chat: ${change.doc.id}`);
-           // Logic to send email if user is offline (simulated by immediate send in this turn)
-           sendChatAlert(change.doc.id, chat);
-        }
-      }
-    });
-  });
-
-  async function sendChatAlert(chatId: string, chat: any) {
-    if (!resend) return;
-    try {
-      const recipientId = chat.unreadCountOwner > 0 ? chat.facilityOwnerId : chat.playerId;
-      const recipientSnap = await getDoc(doc(db, "users", recipientId));
-      const recipient = recipientSnap.data();
-
-      if (recipient?.email && recipient?.notifications?.email !== false) {
-        await resend.emails.send({
-          from: 'CourtReserve <messages@builtbymiguel.net>',
-          to: recipient.email,
-          subject: 'New Message Received',
-          html: `<h1>New Message</h1><p>You have a new message regarding <strong>${chat.facilityName}</strong>.</p><p>"${chat.lastMessage}"</p><a href="https://ais-dev-a66cyx5eupuuojqhntxjqe-509286172976.asia-east1.run.app/messages">View in App</a>`
-        });
-      }
-    } catch (e) { console.error("Chat alert error:", e); }
   }
 
   app.listen(PORT, "0.0.0.0", () => {

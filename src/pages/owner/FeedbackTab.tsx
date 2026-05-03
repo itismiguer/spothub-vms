@@ -39,30 +39,30 @@ export const FeedbackTab: React.FC<FeedbackTabProps> = ({ reviews, loading, onRe
          {reviews.length > 0 ? reviews.map(review => (
            <div key={review.id} className="glass p-10 rounded-[48px] border-white/5 space-y-8 group transition-all hover:border-white/10">
               <div className="flex items-start justify-between">
-                 <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-lime/10 rounded-2xl flex items-center justify-center text-lime font-black italic shadow-inner">
-                      {review.userName[0]}
+                      {review.user_name[0]}
                     </div>
                     <div>
-                       <h4 className="text-sm font-black uppercase tracking-widest text-white">{review.userName}</h4>
+                       <h4 className="text-sm font-black uppercase tracking-widest text-white">{review.user_name}</h4>
                        <div className="flex gap-1 text-lime mt-1">
                           {[1,2,3,4,5].map(i => <Star key={i} size={10} fill={i <= review.rating ? "currentColor" : "none"} />)}
                        </div>
                     </div>
                  </div>
                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                   {review.createdAt?.toDate ? review.createdAt.toDate().toLocaleDateString() : 'Just now'}
+                   {review.created_at ? new Date(review.created_at).toLocaleDateString() : 'Just now'}
                   </span>
                </div>
                <p className="text-slate-300 font-medium leading-relaxed italic text-lg text-pretty">"{review.comment}"</p>
                 
-               {review.ownerReply ? (
+               {review.owner_reply ? (
                  <div className="bg-white/5 border border-white/5 p-8 rounded-[32px] ml-6 relative mt-4">
                     <div className="absolute top-0 left-0 w-1 h-full bg-lime border-r border-charcoal" />
                     <h5 className="text-[10px] font-black text-lime uppercase tracking-widest mb-3 flex items-center gap-2">
                       Official Response <CheckCircle2 size={12} />
                     </h5>
-                    <p className="text-slate-400 text-sm font-medium leading-relaxed">{review.ownerReply.text}</p>
+                    <p className="text-slate-400 text-sm font-medium leading-relaxed">{review.owner_reply.text}</p>
                  </div>
                ) : (
                  <button 

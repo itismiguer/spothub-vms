@@ -1,7 +1,6 @@
 import React from 'react';
 import { useAuth, UserRole } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { supabase } from '../lib/supabase';
 import { User, Shield, ToggleLeft as Toggle, Mail, Calendar, LogOut, Activity, Zap, Trophy, CreditCard, MessageSquare, Phone, Bell, CheckCircle2, ShieldCheck, Building2, MapPin, Upload, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
@@ -13,35 +12,37 @@ export default function Profile() {
   const [formData, setFormData] = React.useState({
     name: '',
     phone: '',
-    businessName: '',
-    businessAddress: ''
+    business_name: '',
+    business_address: ''
   });
 
   React.useEffect(() => {
     if (profile) {
       setFormData({
         name: profile.name || '',
-        phone: profile.phone || '',
-        businessName: profile.businessName || '',
-        businessAddress: profile.businessAddress || ''
+        phone: (profile as any).phone || '',
+        business_name: profile.business_name || '',
+        business_address: profile.business_address || ''
       });
     }
   }, [profile]);
 
-  // Structural Cleanup: Controlled alerts state
   const [systemSettings, setSystemSettings] = React.useState({ globalSmsEnabled: true });
   const [alerts, setAlerts] = React.useState({
-    email: profile?.notifications?.email !== false,
-    sms: profile?.notifications?.sms === true
+    email: (profile as any)?.notifications?.email !== false,
+    sms: (profile as any)?.notifications?.sms === true
   });
 
   React.useEffect(() => {
-    // Consolidated fetch for system settings
     const loadSettings = async () => {
       try {
-        const snap = await getDoc(doc(db, 'system_settings', 'global'));
-        if (snap.exists()) {
-          setSystemSettings({ globalSmsEnabled: snap.data().global_sms_enabled });
+        const { data } = await supabase
+          .from('system_settings')
+          .select('*')
+          .eq('id', 'global')
+          .single();
+        if (data) {
+          setSystemSettings({ globalSmsEnabled: data.global_sms_enabled });
         }
       } catch (e) {
         console.warn("System settings fetch skipped:", e);
@@ -51,22 +52,22 @@ export default function Profile() {
   }, []);
 
   React.useEffect(() => {
-    if (profile?.notifications) {
+    if ((profile as any)?.notifications) {
       setAlerts({
-        email: profile.notifications.email !== false,
-        sms: profile.notifications.sms === true
+        email: (profile as any).notifications.email !== false,
+        sms: (profile as any).notifications.sms === true
       });
     }
-  }, [profile?.notifications]);
+  }, [profile]);
 
   const toggleAlert = async (type: 'email' | 'sms', e: React.MouseEvent) => {
-    e.stopPropagation(); // Stop propagation as requested
+    e.stopPropagation();
     const nextValue = !alerts[type];
     setAlerts(prev => ({ ...prev, [type]: nextValue }));
     
     await handleUpdateProfile({ 
       notifications: { 
-        ...profile?.notifications, 
+        ...(profile as any)?.notifications, 
         [type]: nextValue 
       } 
     });
@@ -76,7 +77,12 @@ export default function Profile() {
     if (!user) return;
     setIsSaving(true);
     try {
-      await updateDoc(doc(db, 'users', user.uid), updates);
+      const { error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', user.id);
+      
+      if (error) throw error;
       toast.success('Preferences synchronized.');
     } catch (error) {
       toast.error('Update failed.');
@@ -93,7 +99,12 @@ export default function Profile() {
   const handleRoleSwitch = async (newRole: UserRole) => {
     if (!user) return;
     try {
-      await updateDoc(doc(db, 'users', user.uid), { role: newRole });
+      const { error } = await supabase
+        .from('profiles')
+        .update({ role: newRole })
+        .eq('id', user.id);
+      
+      if (error) throw error;
       toast.success(`Active role switched to ${newRole}. Refresh to apply changes.`);
     } catch (error) {
       toast.error('Role switch failed.');
@@ -258,12 +269,12 @@ export default function Profile() {
                             type="text" 
                             className="w-full h-16 bg-white/5 border border-white/20 rounded-2xl px-6 focus:outline-none focus:border-lime/40 transition-all font-bold placeholder:text-white/20"
                             placeholder="e.g. Center Court Sports Inc."
-                            value={formData.businessName}
-                            onChange={(e) => setFormData(prev => ({ ...prev, businessName: e.target.value }))}
+                            value={formData.business_name}
+                            onChange={(e) => setFormData(prev => ({ ...prev, business_name: e.target.value }))}
                            />
                          ) : (
                            <div className="w-full h-16 bg-white/5 border border-white/5 rounded-2xl px-6 flex items-center font-bold text-white/80">
-                             {profile?.businessName || 'Not Set'}
+                             {profile?.business_name || 'Not Set'}
                            </div>
                          )}
                          <Building2 className="absolute right-6 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-lime transition-colors" size={20} />
@@ -278,12 +289,12 @@ export default function Profile() {
                             type="text" 
                             className="w-full h-16 bg-white/5 border border-white/20 rounded-2xl px-6 focus:outline-none focus:border-lime/40 transition-all font-bold placeholder:text-white/20"
                             placeholder="Registered Physical Address"
-                            value={formData.businessAddress}
-                            onChange={(e) => setFormData(prev => ({ ...prev, businessAddress: e.target.value }))}
+                            value={formData.business_address}
+                            onChange={(e) => setFormData(prev => ({ ...prev, business_address: e.target.value }))}
                            />
                          ) : (
                            <div className="w-full h-16 bg-white/5 border border-white/5 rounded-2xl px-6 flex items-center font-bold text-white/80 text-sm">
-                             {profile?.businessAddress || 'Not Set'}
+                             {profile?.business_address || 'Not Set'}
                            </div>
                          )}
                          <MapPin className="absolute right-6 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-lime transition-colors" size={20} />
@@ -293,7 +304,7 @@ export default function Profile() {
               </div>
 
               <div className="glass p-10 lg:p-14 rounded-[48px] border-white/10 space-y-8 relative overflow-hidden">
-                 {profile?.verificationStatus === 'verified' && (
+                 {profile?.verification_status === 'verified' && (
                    <div className="absolute inset-0 bg-lime/10 backdrop-blur-sm flex items-center justify-center z-10">
                       <div className="bg-white text-charcoal px-8 py-4 rounded-full font-black uppercase tracking-[0.2em] text-xs shadow-2xl flex items-center gap-3">
                          <CheckCircle2 size={18} /> Account Verified
@@ -307,11 +318,11 @@ export default function Profile() {
                       <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">Proof of Ownership Registry</p>
                     </div>
                     <div className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border transition-all ${
-                      profile?.verificationStatus === 'pending' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20 animate-pulse' :
-                      profile?.verificationStatus === 'verified' ? 'bg-lime text-charcoal' :
+                      profile?.verification_status === 'pending' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20 animate-pulse' :
+                      profile?.verification_status === 'verified' ? 'bg-lime text-charcoal' :
                       'bg-white/5 text-slate-500 border-white/10'
                     }`}>
-                      {profile?.verificationStatus || 'unverified'}
+                      {profile?.verification_status || 'unverified'}
                     </div>
                  </header>
 

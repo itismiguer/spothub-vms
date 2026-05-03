@@ -4,8 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Activity, Star, ShieldCheck, Trophy, ArrowRight, Lock, Mail, Phone, User as UserIcon, Building2, MapPin, Upload, FileCheck, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 
 export default function Register() {
   const { login, loginWithApple, registerWithEmail, user } = useAuth();
@@ -26,8 +25,8 @@ export default function Register() {
     phone: '',
     password: '',
     role: 'PLAYER' as 'PLAYER' | 'OWNER',
-    businessName: '',
-    businessAddress: '',
+    business_name: '',
+    business_address: '',
   });
   const [honeypot, setHoneypot] = React.useState('');
   const [file, setFile] = React.useState<File | null>(null);
@@ -52,18 +51,30 @@ export default function Register() {
     
     setIsSubmitting(true);
     try {
-      let verificationDocUrl = '';
+      let verification_doc_url = '';
       if (formData.role === 'OWNER' && file) {
-        const fileRef = ref(storage, `verification/${Date.now()}_${file.name}`);
-        const snapshot = await uploadBytes(fileRef, file);
-        verificationDocUrl = await getDownloadURL(snapshot.ref);
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Math.random()}.${fileExt}`;
+        const filePath = `verification/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(filePath, file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('documents')
+          .getPublicUrl(filePath);
+        
+        verification_doc_url = publicUrl;
       }
 
       await registerWithEmail(formData.email, formData.password, formData.name, formData.role, {
-        businessName: formData.businessName,
-        businessAddress: formData.businessAddress,
-        verificationDocUrl,
-        verificationStatus: formData.role === 'OWNER' ? 'pending' : undefined
+        business_name: formData.business_name,
+        business_address: formData.business_address,
+        verification_doc_url,
+        verification_status: formData.role === 'OWNER' ? 'pending' : undefined
       });
       
       toast.success(formData.role === 'OWNER' ? "Registration pending admin approval." : "Welcome to RESERVE!");
@@ -276,8 +287,8 @@ export default function Register() {
                         required
                         type="text" 
                         placeholder="Ex. LUKAS SPORT CENTER"
-                        value={formData.businessName}
-                        onChange={(e) => setFormData(prev => ({ ...prev, businessName: e.target.value.toUpperCase() }))}
+                        value={formData.business_name}
+                        onChange={(e) => setFormData(prev => ({ ...prev, business_name: e.target.value.toUpperCase() }))}
                         className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-black uppercase italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/10"
                       />
                     </div>
@@ -291,8 +302,8 @@ export default function Register() {
                         required
                         type="text" 
                         placeholder="STREET, CITY, PROVINCE"
-                        value={formData.businessAddress}
-                        onChange={(e) => setFormData(prev => ({ ...prev, businessAddress: e.target.value.toUpperCase() }))}
+                        value={formData.business_address}
+                        onChange={(e) => setFormData(prev => ({ ...prev, business_address: e.target.value.toUpperCase() }))}
                         className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-black uppercase italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/10"
                       />
                     </div>

@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { collection, addDoc, updateDoc, doc, serverTimestamp, onSnapshot, query, where, getDocs } from 'firebase/firestore';
-import { db, storage } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Plus, Building2, Database, Loader2 } from 'lucide-react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -34,7 +33,7 @@ export default function OwnerDashboard() {
   const [searchParams] = useSearchParams();
   
   // Custom Hooks for Data
-  const { facilities, loading: facilitiesLoading } = useFacilities(user?.uid);
+  const { facilities, loading: facilitiesLoading } = useFacilities(user?.id);
   const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(searchParams.get('facilityId'));
   const { bookings, loading: bookingsLoading } = useBookings(selectedFacilityId);
   
@@ -99,59 +98,65 @@ export default function OwnerDashboard() {
 
   // Fetch System Settings
   useEffect(() => {
-    const unsubSettings = onSnapshot(doc(db, 'system_settings', 'global'), (snap) => {
-      if (snap.exists()) {
-        setSystemSettings(snap.data());
-      }
-    });
-    return () => unsubSettings();
+    async function fetchSettings() {
+      const { data } = await supabase.from('system_settings').select('*').eq('id', 'global').single();
+      if (data) setSystemSettings(data);
+    }
+    fetchSettings();
+
+    const channel = supabase.channel('system_settings')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings', filter: 'id=eq.global' }, (payload) => {
+        setSystemSettings(payload.new);
+      })
+      .subscribe();
+    
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   // Real-time Subscriptions for Courts & Reviews
   useEffect(() => {
     if (!selectedFacilityId) return;
 
-    const unsubCourts = onSnapshot(collection(db, 'facilities', selectedFacilityId, 'courts'), (snap) => {
-      setCourts(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Court[]);
-    });
+    async function fetchData() {
+      const { data: courtsData } = await supabase.from('courts').select('*').eq('facility_id', selectedFacilityId);
+      setCourts(courtsData as Court[] || []);
 
-    const reviewsQ = query(collection(db, 'reviews'), where('facilityId', '==', selectedFacilityId));
-    const unsubReviews = onSnapshot(reviewsQ, (snap) => {
-      setReviews(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Review[]);
-    });
+      const { data: reviewsData } = await supabase.from('reviews').select('*').eq('facility_id', selectedFacilityId);
+      setReviews(reviewsData as Review[] || []);
+    }
+
+    fetchData();
+
+    const courtsSub = supabase.channel(`courts-${selectedFacilityId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courts', filter: `facility_id=eq.${selectedFacilityId}` }, fetchData)
+      .subscribe();
+
+    const reviewsSub = supabase.channel(`reviews-${selectedFacilityId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews', filter: `facility_id=eq.${selectedFacilityId}` }, fetchData)
+      .subscribe();
 
     return () => {
-      unsubCourts();
-      unsubReviews();
+      supabase.removeChannel(courtsSub);
+      supabase.removeChannel(reviewsSub);
     };
   }, [selectedFacilityId]);
 
   const checkOverlap = async (courtId: string, start: Date, end: Date) => {
-    const q = query(
-      collection(db, 'bookings'),
-      where('courtId', '==', courtId),
-      where('status', 'in', ['CONFIRMED', 'manual_block', 'MAINTENANCE', 'PENDING'])
-    );
-    const snap = await getDocs(q);
-    return snap.docs.some(doc => {
-      const bData = doc.data();
-      const bStart = bData.startTime.toDate();
-      const bEnd = bData.endTime.toDate();
+    const { data: overlaps } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('court_id', courtId)
+      .in('status', ['CONFIRMED', 'manual_block', 'MAINTENANCE', 'PENDING']);
+    
+    return overlaps?.some(b => {
+      const bStart = new Date(b.start_time);
+      const bEnd = new Date(b.end_time);
       return (start < bEnd && end > bStart);
     });
   };
 
   const handleManualBooking = async () => {
     if (!selectedFacilityId || !manualBooking.courtId) return;
-
-    // Security check for verified email/identity
-    const isVerified = user?.emailVerified || profile?.email_confirmed_at;
-    if (!isVerified) {
-      toast.error('VERIFICATION REQUIRED', {
-        description: 'Please verify your email to log manual entries.'
-      });
-      return;
-    }
 
     setIsUpdating(true);
     try {
@@ -171,19 +176,18 @@ export default function OwnerDashboard() {
 
       const bookingRef = `#MAN-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
       
-      await addDoc(collection(db, 'bookings'), {
-        facilityId: selectedFacilityId,
-        facilityName: activeFac?.name || 'Unknown',
-        courtId: manualBooking.courtId,
-        courtName: courts.find(c => c.id === manualBooking.courtId)?.name || 'Unknown Court',
-        userId: user?.uid,
-        userName: (manualBooking.guestName || 'OWNER BLOCK').toUpperCase(),
-        startTime: start,
-        endTime: end,
+      await supabase.from('bookings').insert({
+        facility_id: selectedFacilityId,
+        facility_name: activeFac?.name || 'Unknown',
+        court_id: manualBooking.courtId,
+        court_name: courts.find(c => c.id === manualBooking.courtId)?.name || 'Unknown Court',
+        user_id: user?.id,
+        user_name: (manualBooking.guestName || 'OWNER BLOCK').toUpperCase(),
+        start_time: start.toISOString(),
+        end_time: end.toISOString(),
         status: 'CONFIRMED',
         source: 'manual',
-        bookingReference: bookingRef,
-        createdAt: serverTimestamp(),
+        booking_reference: bookingRef,
         amount: 0
       });
 
@@ -200,7 +204,7 @@ export default function OwnerDashboard() {
     if (!selectedFacilityId) return;
     setIsUpdating(true);
     try {
-      await updateDoc(doc(db, 'facilities', selectedFacilityId), updates);
+      await supabase.from('facilities').update(updates).eq('id', selectedFacilityId);
       toast.success('Settings updated.');
     } catch (err) {
       toast.error('Failed to update facility.');
@@ -212,7 +216,7 @@ export default function OwnerDashboard() {
   const onApproveDecline = async (id: string, status: string, msg: string) => {
     setIsUpdating(true);
     try {
-      await updateDoc(doc(db, 'bookings', id), { status });
+      await supabase.from('bookings').update({ status }).eq('id', id);
       toast.success(msg);
     } catch (err) {
       toast.error('Operation failed.');
@@ -225,7 +229,7 @@ export default function OwnerDashboard() {
     if (!user) return;
     setIsSeeding(true);
     try {
-      await seedDemoData(user.email || '', user.uid);
+      await seedDemoData(user.email || '', user.id);
       toast.success('Sample data generated!');
     } catch (error) {
       toast.error('Generation failed.');

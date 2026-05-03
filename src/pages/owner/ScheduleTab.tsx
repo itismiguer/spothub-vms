@@ -108,9 +108,9 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                 </div>
                 {filteredCourts.map(court => {
                   const booking = bookings.find(b => {
-                    if (b.courtId !== court.id) return false;
-                    const bStart = b.startTime.toDate();
-                    const bEnd = b.endTime.toDate();
+                    if (b.court_id !== court.id) return false;
+                    const bStart = new Date(b.start_time);
+                    const bEnd = new Date(b.end_time);
                     return (startSlot < bEnd && endSlot > bStart) && b.status !== 'CANCELLED' && b.status !== 'cancelled';
                   });
 
@@ -126,10 +126,10 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                           }`}
                         >
                           <span className="text-[6px] sm:text-[8px] font-black uppercase tracking-widest opacity-60">
-                            {(booking as any).bookingReference || 'BLOCKED'}
+                            {(booking as any).booking_reference || 'BLOCKED'}
                           </span>
                           <span className="text-[8px] sm:text-[11px] font-black uppercase italic tracking-tighter truncate max-w-full">
-                            {booking.userName || 'Guest'}
+                            {booking.user_name || 'Guest'}
                           </span>
                         </button>
                       ) : (

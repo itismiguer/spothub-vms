@@ -5,14 +5,14 @@ export interface Facility {
   address: string;
   description: string;
   images: string[];
-  coverImage?: string;
+  cover_image?: string;
   amenities?: string[];
   operating_hours?: { open: string; close: string };
   rules?: string;
   lat: number;
   lng: number;
   status?: 'LIVE' | 'DEACTIVATED';
-  showPublicSchedule?: boolean;
+  show_public_schedule?: boolean;
 }
 
 export interface Court {
@@ -32,6 +32,14 @@ export interface Booking {
   end_time: string;
   status: string;
   facility_id: string;
+  facility_name?: string;
+  court_name?: string;
+  amount?: number;
+  total_price?: number;
+  payment_receipt_url?: string;
+  booking_reference?: string;
+  created_at?: string;
+  cancellation_reason?: string;
 }
 
 export interface Review {

@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { doc, getDoc, collection, query, where, addDoc, serverTimestamp, onSnapshot, setDoc, getDocs, updateDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { format, addHours, startOfDay, isBefore, eachHourOfInterval, setHours, addDays, isSameDay, parseISO } from 'date-fns';
+import { format, addHours, startOfDay, isBefore, eachHourOfInterval, setHours, addDays, isSameDay } from 'date-fns';
 import { MapPin, Clock, ArrowLeft, CheckCircle2, Star, ShieldAlert, Trophy, Info, Calendar as CalendarIcon, ShieldCheck, Activity, XCircle, Loader2, MessageCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import Selector from '../components/Selector';
@@ -17,29 +16,33 @@ interface Facility {
   description: string;
   address: string;
   images: string[];
-  ownerId: string;
+  owner_id: string;
   rules?: string;
+  status: 'ACTIVE' | 'DEACTIVATED';
 }
 
 interface Court {
   id: string;
   name: string;
-  hourlyRate: number;
+  hourly_rate: number;
 }
 
 interface Booking {
   id: string;
-  startTime: any;
-  endTime: any;
-  courtId: string;
-  status: 'CONFIRMED' | 'CANCELLED' | 'MAINTENANCE' | 'PENDING' | 'manual_block';
+  start_time: string;
+  end_time: string;
+  court_id: string;
+  status: 'CONFIRMED' | 'CANCELLED' | 'MAINTENANCE' | 'PENDING' | 'RESERVED' | 'PENDING_PROOF' | 'UNDER_REVIEW' | 'manual_block';
+  expires_at?: string;
+  court_name?: string;
+  facility_id: string;
 }
 
 interface Review {
   id: string;
   rating: number;
   comment?: string;
-  facilityId: string;
+  facility_id: string;
 }
 
 export default function FacilityDetail() {
@@ -88,7 +91,7 @@ export default function FacilityDetail() {
     return () => document.body.classList.remove('modal-open');
   }, [pendingBookingStart, isReporting, showSuccessModal]);
 
-  const isOwner = user && facility && facility.ownerId === user.uid;
+  const isOwner = user && facility && facility.owner_id === user.id;
   const isAdmin = profile?.role === 'ADMIN';
 
   const handleStartChat = async () => {
@@ -97,41 +100,37 @@ export default function FacilityDetail() {
       return;
     }
 
-    if (!user.emailVerified && user.providerData?.[0]?.providerId === 'password') {
-      toast.error('VERIFICATION REQUIRED', {
-        description: 'Please verify your email address to start inquiries.'
-      });
-      return;
-    }
-    
     if (isOwner) {
       toast.info('This is your own facility dashboard.');
       return;
     }
 
     setIsStartingChat(true);
-    const chatId = `${user.uid}_${id}`;
+    const chatId = `${user.id}_${id}`;
     
     try {
-      const chatRef = doc(db, 'chats', chatId);
-      const chatSnap = await getDoc(chatRef);
+      const { data: chatSnap, error: chatError } = await supabase
+        .from('chats')
+        .select('*')
+        .eq('id', chatId)
+        .single();
       
-      if (!chatSnap.exists()) {
-        await setDoc(chatRef, {
-          playerId: user.uid,
-          playerName: profile?.name || 'Anonymous Player',
-          facilityId: id,
-          facilityName: facility.name,
-          facilityOwnerId: facility.ownerId,
-          lastTimestamp: serverTimestamp(),
-          unreadCountOwner: 1,
-          createdAt: serverTimestamp()
+      if (chatError || !chatSnap) {
+        await supabase.from('chats').insert({
+          id: chatId,
+          player_id: user.id,
+          player_name: profile?.name || 'Anonymous Player',
+          facility_id: id,
+          facility_name: facility.name,
+          facility_owner_id: facility.owner_id,
+          last_timestamp: new Date().toISOString(),
+          unread_count_owner: 1
         });
         
-        await addDoc(collection(db, 'chats', chatId, 'messages'), {
+        await supabase.from('messages').insert({
+          chat_id: chatId,
           text: `Inquiry started for ${facility.name}. How can I help you?`,
-          senderId: 'system',
-          timestamp: serverTimestamp()
+          sender_id: 'system'
         });
       }
       
@@ -144,80 +143,74 @@ export default function FacilityDetail() {
   };
 
   useEffect(() => {
-    let unsubscribeCourts: () => void;
+    if (!id) return;
 
-    async function fetchStaticData() {
-      if (!id) return;
+    async function fetchData() {
       try {
-        const facilitySnap = await getDoc(doc(db, 'facilities', id));
-        if (facilitySnap.exists()) {
-          const data = facilitySnap.data() as any;
-          
-          // Redirect if deactivated and not the owner/admin
-          const isOwner = user && data.ownerId === user.uid;
-          const isAdmin = profile?.role === 'ADMIN';
-          
-          if (data.status === 'DEACTIVATED' && !isOwner && !isAdmin) {
-            toast.error('Facility Offline', {
-              description: 'The management has temporarily taken this facility offline.'
-            });
-            navigate('/');
-            return;
-          }
-          
-          setFacility({ id: facilitySnap.id, ...data } as Facility);
+        const { data: facilityData, error: facilityError } = await supabase
+          .from('facilities')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (facilityError) throw facilityError;
+        
+        const isOwner = user && facilityData.owner_id === user.id;
+        const isAdmin = profile?.role === 'ADMIN';
+        
+        if (facilityData.status === 'DEACTIVATED' && !isOwner && !isAdmin) {
+          toast.error('Facility Offline', {
+            description: 'The management has temporarily taken this facility offline.'
+          });
+          navigate('/');
+          return;
         }
+        
+        setFacility(facilityData as Facility);
 
-        const unsubCourts = onSnapshot(collection(db, 'facilities', id, 'courts'), (snap) => {
-          const courtsData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Court[];
-          setCourts(courtsData);
-        });
+        const { data: courtsData } = await supabase.from('courts').select('*').eq('facility_id', id);
+        setCourts(courtsData as Court[] || []);
 
-        const bookingsQ = query(collection(db, 'bookings'), where('facilityId', '==', id));
-        const unsubBookings = onSnapshot(bookingsQ, (snap) => {
-          setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Booking[]);
-        });
+        const { data: bookingsData } = await supabase.from('bookings').select('*').eq('facility_id', id);
+        setBookings(bookingsData as Booking[] || []);
 
-        const reviewsQ = query(collection(db, 'reviews'), where('facilityId', '==', id));
-        const unsubReviews = onSnapshot(reviewsQ, (snap) => {
-          setReviews(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Review[]);
-        });
-
-        return () => {
-          unsubCourts();
-          unsubBookings();
-          unsubReviews();
-        };
+        const { data: reviewsData } = await supabase.from('reviews').select('*').eq('facility_id', id);
+        setReviews(reviewsData || []);
 
       } catch (error) {
-        handleFirestoreError(error, OperationType.GET, 'facility');
+        console.error("Facility fetchData error:", error);
       } finally {
         setLoading(false);
       }
     }
 
-    const cleanup = fetchStaticData();
+    fetchData();
+
+    // Setup subscriptions
+    const courtsSub = supabase.channel(`courts-${id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courts', filter: `facility_id=eq.${id}` }, fetchData)
+      .subscribe();
+
+    const bookingsSub = supabase.channel(`bookings-${id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `facility_id=eq.${id}` }, fetchData)
+      .subscribe();
+
+    const reviewsSub = supabase.channel(`reviews-${id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reviews', filter: `facility_id=eq.${id}` }, fetchData)
+      .subscribe();
+
     return () => {
-      cleanup.then(unsub => unsub?.());
+      supabase.removeChannel(courtsSub);
+      supabase.removeChannel(bookingsSub);
+      supabase.removeChannel(reviewsSub);
     };
-  }, [id]);
+  }, [id, user]);
 
   useEffect(() => {
     if (courts.length > 0 && !selectedCourt) {
       setSelectedCourt(courts[0].id);
     }
   }, [courts, selectedCourt]);
-
-  useEffect(() => {
-    if (!id) return;
-    const q = query(collection(db, 'bookings'), where('facilityId', '==', id));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setBookings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Booking[]);
-    }, (error) => {
-      console.error("Bookings listener error:", error);
-    });
-    return () => unsubscribe();
-  }, [id]);
 
   useEffect(() => {
     const isAnyModalOpen = pendingBookingStart || showSuccessModal || isReporting || showLockdownConfirm;
@@ -240,18 +233,18 @@ export default function FacilityDetail() {
     const endTime = new Date(startTime.getTime() + durationMinutes * 60000);
 
     const match = bookings.find(b => {
-      if (b.courtId !== selectedCourt) return false;
+      if (b.court_id !== selectedCourt) return false;
       const bStatus = b.status?.toUpperCase();
       if (bStatus === 'CANCELLED') return false;
 
       // Check for reservation expiry if RESERVED or PENDING_PROOF
-      if ((bStatus === 'RESERVED' || bStatus === 'PENDING_PROOF' || bStatus === 'UNDER_REVIEW') && b.expiresAt) {
-        const expiry = b.expiresAt.toDate ? b.expiresAt.toDate() : new Date(b.expiresAt);
+      if ((bStatus === 'RESERVED' || bStatus === 'PENDING_PROOF' || bStatus === 'UNDER_REVIEW') && b.expires_at) {
+        const expiry = new Date(b.expires_at);
         if (new Date() > expiry) return false; // Ignore expired reservations
       }
 
-      const bStart = b.startTime.toDate ? b.startTime.toDate() : new Date(b.startTime);
-      const bEnd = b.endTime.toDate ? b.endTime.toDate() : new Date(b.endTime);
+      const bStart = new Date(b.start_time);
+      const bEnd = new Date(b.end_time);
       return (startTime < bEnd) && (endTime > bStart);
     });
 
@@ -269,35 +262,36 @@ export default function FacilityDetail() {
       const end48 = new Date(now.getTime() + 48 * 60 * 60 * 1000);
       
       // 1. Cancel overlapping confirmed bookings
-      const q = query(
-        collection(db, 'bookings'), 
-        where('facilityId', '==', id),
-        where('status', '==', 'CONFIRMED')
-      );
-      const snap = await getDocs(q);
-      const cancellations = snap.docs.filter(d => {
-        const bStart = d.data().startTime.toDate();
-        return bStart < end48 && bStart > now;
-      }).map(d => updateDoc(doc(db, 'bookings', d.id), { 
-        status: 'CANCELLED',
-        cancellationReason: 'Emergency Facility Maintenance'
-      }));
-      await Promise.all(cancellations);
+      const { data: bookingsToCancel } = await supabase
+        .from('bookings')
+        .select('id, start_time')
+        .eq('facility_id', id)
+        .eq('status', 'CONFIRMED');
+      
+      if (bookingsToCancel) {
+        const cancellations = bookingsToCancel.filter(d => {
+          const bStart = new Date(d.start_time);
+          return bStart < end48 && bStart > now;
+        }).map(d => supabase.from('bookings').update({ 
+          status: 'CANCELLED',
+          cancellation_reason: 'Emergency Facility Maintenance'
+        }).eq('id', d.id));
+        await Promise.all(cancellations);
+      }
 
       // 2. Create maintenance blocks for all courts
       await Promise.all(courts.map(court => 
-        addDoc(collection(db, 'bookings'), {
-          courtId: court.id,
-          courtName: court.name,
-          facilityId: id,
-          facilityName: facility.name,
-          facilityOwnerId: facility.ownerId,
-          userId: user?.uid,
-          userName: '(SYSTEM LOCKDOWN)',
-          startTime: now,
-          endTime: end48,
+        supabase.from('bookings').insert({
+          court_id: court.id,
+          court_name: court.name,
+          facility_id: id,
+          facility_name: facility.name,
+          facility_owner_id: facility.owner_id,
+          user_id: user?.id,
+          user_name: '(SYSTEM LOCKDOWN)',
+          start_time: now.toISOString(),
+          end_time: end48.toISOString(),
           status: 'MAINTENANCE',
-          createdAt: serverTimestamp(),
           amount: 0
         })
       ));
@@ -318,9 +312,9 @@ export default function FacilityDetail() {
 
   useEffect(() => {
     if (!lastBookingId) return;
-    const unsub = onSnapshot(doc(db, 'bookings', lastBookingId), (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
+    const channel = supabase.channel(`booking-${lastBookingId}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bookings', filter: `id=eq.${lastBookingId}` }, (payload) => {
+        const data = payload.new as any;
         setCurrentBookingStatus(data.status);
         if (data.status === 'CONFIRMED' && currentBookingStatus === 'PENDING') {
           toast.success("YOUR BOOKING WAS JUST APPROVED!", {
@@ -328,16 +322,17 @@ export default function FacilityDetail() {
             style: { background: '#B5F55A', color: '#121212' }
           });
         }
-      }
-    });
-    return () => unsub();
+      })
+      .subscribe();
+    
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [lastBookingId, currentBookingStatus]);
 
   const handleBooking = async () => {
-    if (!user?.emailVerified && user?.providerData?.[0]?.providerId === 'password') {
-      toast.error('VERIFICATION REQUIRED', {
-        description: 'Please verify your email address to submit reservations.'
-      });
+    if (!user) {
+      navigate('/register', { state: { from: location } });
       return;
     }
 
@@ -345,7 +340,7 @@ export default function FacilityDetail() {
       toast.error('ACCESS RESTRICTED: Owners must log sessions via CMS Console.');
       return;
     }
-    if (!user || !pendingBookingStart || !bookingEnd) {
+    if (!pendingBookingStart || !bookingEnd) {
       toast.error('Identity and complete timing required!');
       return;
     }
@@ -373,24 +368,22 @@ export default function FacilityDetail() {
       return;
     }
 
-    const checkOverlap = async (courtId: string, start: Date, end: Date) => {
-      const q = query(
-        collection(db, 'bookings'),
-        where('courtId', '==', courtId),
-        where('status', 'in', ['CONFIRMED', 'manual_block'])
-      );
-      const snap = await getDocs(q);
-      return snap.docs.some(doc => {
-        const bStart = doc.data().startTime.toDate();
-        const bEnd = doc.data().endTime.toDate();
-        return (start < bEnd && end > bStart);
-      });
-    };
-
     setIsBooking(true);
 
     try {
-      const hasOverlap = await checkOverlap(selectedCourt, pendingBookingStart, endTime);
+      // Direct overlap check via query
+      const { data: overlaps } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('court_id', selectedCourt)
+        .in('status', ['CONFIRMED', 'manual_block']);
+      
+      const hasOverlap = overlaps?.some(b => {
+        const bStart = new Date(b.start_time);
+        const bEnd = new Date(b.end_time);
+        return (pendingBookingStart < bEnd && endTime > bStart);
+      });
+
       if (hasOverlap) {
         toast.error('TIME CONFLICT: This range is now occupied.');
         setIsBooking(false);
@@ -404,47 +397,48 @@ export default function FacilityDetail() {
       const expiresAt = new Date(Date.now() + 20 * 60000);
 
       const bookingData = {
-        courtId: selectedCourt,
-        courtName: selectedCourtData?.name || 'Unknown Court',
-        facilityId: id,
-        facilityName: facility.name,
-        facilityOwnerId: facility.ownerId, 
-        userId: user.uid,
-        userName: profile?.name || user.displayName || user.email,
-        startTime: pendingBookingStart,
-        endTime: endTime,
-        status: 'RESERVED', // Initial state: First stage of 4-stage workflow
-        expiresAt: expiresAt,
-        bookingReference: bookingRef,
-        createdAt: serverTimestamp(),
-        amount: (selectedCourtData?.hourlyRate || 0) * (durationMinutes / 60),
+        court_id: selectedCourt,
+        court_name: selectedCourtData?.name || 'Unknown Court',
+        facility_id: id,
+        facility_name: facility.name,
+        facility_owner_id: facility.owner_id, 
+        user_id: user.id,
+        user_name: profile?.name || user.email,
+        start_time: pendingBookingStart.toISOString(),
+        end_time: endTime.toISOString(),
+        status: 'RESERVED',
+        expires_at: expiresAt.toISOString(),
+        booking_reference: bookingRef,
+        amount: (selectedCourtData?.hourly_rate || 0) * (durationMinutes / 60),
       };
 
-      const docRef = await addDoc(collection(db, 'bookings'), bookingData);
+      const { data: newBooking, error: bookingErr } = await supabase
+        .from('bookings')
+        .insert(bookingData)
+        .select()
+        .single();
+      
+      if (bookingErr) throw bookingErr;
 
-      // Notify the Owner (Wait for next turn for owner discovery, for now notify related players or admins)
-      // Actually, we can notify the user that their slot is locked
-      await addDoc(collection(db, 'notifications'), {
-        userId: user.uid,
+      await supabase.from('notifications').insert({
+        user_id: user.id,
         title: 'Slot Reserved',
         message: `You have 20 minutes to upload proof for ${selectedCourtData?.name}.`,
         type: 'new_booking',
         read: false,
-        createdAt: serverTimestamp(),
-        relatedId: docRef.id
+        related_id: newBooking.id
       });
 
-      setLastBookingId(docRef.id);
+      setLastBookingId(newBooking.id);
       setCurrentBookingStatus('RESERVED');
       
       setLastBookingData({
         ...bookingData,
-        startTime: pendingBookingStart,
-        endTime: endTime,
-        id: docRef.id
+        start_time: pendingBookingStart.toISOString(),
+        end_time: endTime.toISOString(),
+        id: newBooking.id
       });
 
-      // Redirect to My Bookings so they can see the timer and upload proof
       toast.success('SLOT RESERVED: 20 Minutes to Secure!', {
         duration: 5000,
         icon: '⏳',
@@ -454,7 +448,6 @@ export default function FacilityDetail() {
       
     } catch (error) {
       console.error("Booking write error:", error);
-      handleFirestoreError(error, OperationType.WRITE, 'bookings');
     } finally {
       setIsBooking(false);
     }
@@ -786,7 +779,7 @@ export default function FacilityDetail() {
               <div className="pt-4 border-t border-white/5 flex items-center justify-between">
                 <div>
                   <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Rate (60 MIN)</p>
-                  <p className="text-2xl font-display font-black italic uppercase">₱{courts.find(c => c.id === selectedCourt)?.hourlyRate || 350}</p>
+                  <p className="text-2xl font-display font-black italic uppercase">₱{courts.find(c => c.id === selectedCourt)?.hourly_rate || 350}</p>
                 </div>
                 <div className="w-12 h-12 bg-lime/10 rounded-2xl flex items-center justify-center text-lime ring-1 ring-lime/20">
                   <Activity size={24} />
@@ -931,7 +924,7 @@ export default function FacilityDetail() {
                     </div>
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-500 uppercase font-bold tracking-widest text-[10px]">Rate per Hour</span>
-                      <span className="text-white font-black italic">₱{courts.find(c => c.id === selectedCourt)?.hourlyRate}</span>
+                      <span className="text-white font-black italic">₱{courts.find(c => c.id === selectedCourt)?.hourly_rate}</span>
                     </div>
                     <div className="pt-6 border-t border-white/10 flex justify-between items-center">
                       <span className="text-lime uppercase font-black tracking-widest text-[10px] italic shrink-0">Total Due</span>
@@ -1040,19 +1033,19 @@ export default function FacilityDetail() {
                    <div className="glass bg-white/5 border-white/10 p-5 sm:p-6 rounded-3xl space-y-4">
                       <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
                         <div className="text-left w-full sm:w-auto">
-                          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 mb-1">Venue & Court</p>
+                          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 mb-1">Venue</p>
                           <p className="text-lg sm:text-xl font-bold text-white whitespace-normal break-words">{facility.name}</p>
-                          <p className="text-[10px] sm:text-xs font-black text-lime uppercase tracking-widest">{lastBookingData.courtName}</p>
+                          <p className="text-[10px] sm:text-xs font-black text-lime uppercase tracking-widest">{lastBookingData.court_name}</p>
                         </div>
                         <div className="text-left sm:text-right w-full sm:w-auto">
                           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 mb-1">Ref ID</p>
-                          <p className={`text-[10px] sm:text-[11px] font-black uppercase tracking-widest px-3 py-1 rounded-full border inline-block ${currentBookingStatus === 'PENDING' ? 'text-orange-500 bg-orange-500/10 border-orange-500/20' : 'text-lime bg-lime/10 border-lime/20'}`}>{lastBookingData.bookingReference}</p>
+                          <p className={`text-[10px] sm:text-[11px] font-black uppercase tracking-widest px-3 py-1 rounded-full border inline-block ${currentBookingStatus === 'PENDING' ? 'text-orange-500 bg-orange-500/10 border-orange-500/20' : 'text-lime bg-lime/10 border-lime/20'}`}>{lastBookingData.booking_reference}</p>
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-4 border-t border-white/5 pt-4">
                          <div>
                             <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 mb-1">Date</p>
-                            <p className="text-xs sm:text-sm font-bold text-white whitespace-normal break-words">{format(lastBookingData.startTime, 'MMM dd, yyyy')}</p>
+                            <p className="text-xs sm:text-sm font-bold text-white whitespace-normal break-words">{format(new Date(lastBookingData.start_time), 'MMM dd, yyyy')}</p>
                          </div>
                          <div>
                             <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40 mb-1">Status</p>
@@ -1197,14 +1190,14 @@ export default function FacilityDetail() {
                        }
                        setIsSubmittingReport(true);
                        try {
-                         await addDoc(collection(db, 'reports'), {
-                           facilityId: id,
-                           facilityName: facility.name,
-                           userId: user.uid,
-                           userName: profile?.name || user.email || 'Anonymous',
+                         await supabase.from('reports').insert({
+                           facility_id: id,
+                           facility_name: facility.name,
+                           user_id: user.id,
+                           user_name: profile?.name || user.email || 'Anonymous',
                            type: reportType,
                            status: 'OPEN',
-                           createdAt: serverTimestamp()
+                           created_at: new Date().toISOString()
                          });
                          toast.message('Report Logged', {
                            description: 'The facility owner has been notified. Thank you for your vigilance.'

@@ -126,7 +126,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                      </div>
                 </div>
                 <h3 className="text-2xl font-display font-black uppercase italic text-white/90">{court.name}</h3>
-                <p className="text-xs font-bold text-slate-400 mb-6 uppercase tracking-widest leading-none">₱{court.hourlyRate}/hour session</p>
+                <p className="text-xs font-bold text-slate-400 mb-6 uppercase tracking-widest leading-none">₱{court.hourly_rate}/hour session</p>
                 <button 
                   onClick={() => onViewSchedule(court)}
                   className="text-[10px] uppercase font-bold tracking-[0.2em] text-lime flex items-center gap-2 hover:gap-4 transition-all"
@@ -153,7 +153,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                        </div>
                        <div>
                           <div className="flex items-center gap-3">
-                             <p className="text-xl font-display font-black uppercase italic text-white leading-none">{booking.userName}</p>
+                             <p className="text-xl font-display font-black uppercase italic text-white leading-none">{booking.user_name}</p>
                              <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest border ${
                                booking.status === 'PENDING_PROOF' ? 'bg-blue-500/20 text-blue-400 border-blue-500/20' : 
                                booking.status === 'UNDER_REVIEW' ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/20' : 
@@ -163,14 +163,14 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                              </span>
                           </div>
                           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2">
-                             {courts.find(c => c.id === booking.courtId)?.name} • {format(booking.startTime.toDate(), 'MMM dd, h:mm a')}
+                             {courts.find(c => c.id === booking.court_id)?.name} • {format(new Date(booking.start_time), 'MMM dd, h:mm a')}
                           </p>
                        </div>
                     </div>
                     <div className="flex gap-3">
-                       {(booking as any).paymentReceiptUrl && (
+                       {(booking as any).payment_receipt_url && (
                           <a 
-                            href={(booking as any).paymentReceiptUrl} 
+                            href={(booking as any).payment_receipt_url} 
                             target="_blank" 
                             rel="noopener noreferrer"
                             className="glass px-6 py-4 rounded-2xl text-[9px] font-black uppercase tracking-widest text-lime hover:bg-lime/10 transition-all flex items-center justify-center gap-2"
@@ -264,17 +264,17 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             {bookings.filter(b => b.status !== 'MAINTENANCE' && b.status !== 'manual_block').length > 0 ? (
               [...bookings]
                 .filter(b => b.status !== 'MAINTENANCE' && b.status !== 'manual_block')
-                .sort((a, b) => b.startTime.toMillis() - a.startTime.toMillis())
+                .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
                 .slice(0, 5)
                 .map(b => (
                   <div key={b.id} className="flex items-center gap-4 p-4 glass rounded-3xl border-transparent hover:border-white/10 transition-all group">
                      <div className="w-12 h-12 glass rounded-2xl flex items-center justify-center font-display font-black italic text-[10px] text-lime border border-white/5 group-hover:bg-lime group-hover:text-charcoal transition-all">
-                       {b.startTime.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                       {new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
                      </div>
                      <div className="flex-1 min-w-0">
-                        <p className="text-[11px] font-black uppercase italic text-white truncate">{b.userName}</p>
+                        <p className="text-[11px] font-black uppercase italic text-white truncate">{b.user_name}</p>
                         <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest truncate">
-                          {courts.find(c => c.id === b.courtId)?.name}
+                          {courts.find(c => c.id === b.court_id)?.name}
                         </p>
                      </div>
                   </div>

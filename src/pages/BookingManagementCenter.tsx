@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, orderBy, updateDoc, doc, Timestamp } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -16,27 +15,29 @@ import {
   Loader2,
   ChevronRight,
   Search,
-  Activity
+  Activity,
+  ShieldAlert
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
-type BookingStatus = 'PENDING' | 'CONFIRMED' | 'CANCELLED' | 'COMPLETED' | 'MAINTENANCE';
+type BookingStatus = 'PENDING' | 'CONFIRMED' | 'CANCELLED' | 'COMPLETED' | 'MAINTENANCE' | 'UNDER_REVIEW' | 'PENDING_PROOF';
 
 interface Booking {
   id: string;
-  userId: string;
-  userName: string;
-  facilityId: string;
-  facilityName: string;
-  courtName: string;
-  startTime: Timestamp;
-  endTime: Timestamp;
+  user_id: string;
+  user_name: string;
+  facility_id: string;
+  facility_name: string;
+  court_name: string;
+  start_time: string;
+  end_time: string;
   status: BookingStatus;
-  totalPrice?: number;
+  total_price?: number;
   amount?: number;
-  paymentReceiptUrl?: string;
-  createdAt?: Timestamp;
+  payment_receipt_url?: string;
+  created_at?: string;
+  booking_reference: string;
 }
 
 export default function BookingManagementCenter() {
@@ -47,34 +48,40 @@ export default function BookingManagementCenter() {
   const [loading, setLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
 
-  useEffect(() => {
+  const fetchBookings = async () => {
     if (!user || !profile) return;
 
-    const bookingsRef = collection(db, 'bookings');
-    let q;
-    
-    const isSuperAdmin = profile.email === 'miguel@builtbymiguel.net';
-
-    if (profile.role === 'ADMIN' && isSuperAdmin) {
-      q = query(bookingsRef, orderBy('startTime', 'desc'));
-    } else {
-      q = query(bookingsRef, where('facilityOwnerId', '==', user.uid), orderBy('startTime', 'desc'));
-    }
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Booking));
+    try {
+      let query = supabase.from('bookings').select('*').order('start_time', { ascending: false });
       
+      const isSuperAdmin = profile.email === 'miguel@builtbymiguel.net' || profile.role === 'super_admin';
+
+      if (profile.role !== 'ADMIN' && !isSuperAdmin) {
+        // Find facilities owned by this user first
+        const { data: ownFacilities } = await supabase.from('facilities').select('id').eq('owner_id', user.id);
+        const facilityIds = ownFacilities?.map(f => f.id) || [];
+        query = query.in('facility_id', facilityIds);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const typedData = (data || []).map(b => ({
+        ...b,
+        status: b.status as BookingStatus
+      }));
+
       // Auto-cancel logic: if PENDING and older than 60 mins
-      const now = Date.now();
-      data.forEach(async (b) => {
-        if (b.status === 'PENDING' && b.createdAt) {
-          const createdTime = b.createdAt.toMillis();
+      const now = new Date().getTime();
+      typedData.forEach(async (b) => {
+        if (b.status === 'PENDING' && b.created_at) {
+          const createdTime = new Date(b.created_at).getTime();
           if (now - createdTime > 60 * 60 * 1000) {
             try {
-              await updateDoc(doc(db, 'bookings', b.id), { 
+              await supabase.from('bookings').update({ 
                 status: 'CANCELLED',
-                cancellationReason: 'Auto-cancelled: Verification timeout (60m)' 
-              });
+                cancellation_reason: 'Auto-cancelled: Verification timeout (60m)' 
+              }).eq('id', b.id);
             } catch (e) {
               console.error("Auto-cancel failed for", b.id);
             }
@@ -82,22 +89,45 @@ export default function BookingManagementCenter() {
         }
       });
 
-      // Sound chime for new bookings
-      if (!loading && snapshot.docChanges().some(change => change.type === 'added')) {
-        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-        audio.play().catch(e => console.log('Autoplay blocked'));
-        toast.info('NEW SIGNAL DETECTED: Incoming Booking');
+      setBookings(typedData);
+      
+      // Update selected booking if it exists
+      if (selectedBooking) {
+        const updated = typedData.find(b => b.id === selectedBooking.id);
+        if (updated) setSelectedBooking(updated);
       }
 
-      setBookings(data);
+    } catch (error) {
+      console.error("Fetch bookings error:", error);
+    } finally {
       setLoading(false);
-    });
+    }
+  };
 
-    return () => unsubscribe();
+  useEffect(() => {
+    if (!user || !profile) return;
+    
+    fetchBookings();
+
+    const channel = supabase
+      .channel('booking_stream')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+          audio.play().catch(e => console.log('Autoplay blocked'));
+          toast.info('NEW SIGNAL DETECTED: Incoming Booking');
+        }
+        fetchBookings();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user, profile]);
 
   const filteredBookings = bookings.filter(b => {
-    if (activeFilter === 'PENDING') return b.status === 'PENDING';
+    if (activeFilter === 'PENDING') return b.status === 'PENDING' || b.status === 'PENDING_PROOF' || b.status === 'UNDER_REVIEW';
     if (activeFilter === 'CONFIRMED') return b.status === 'CONFIRMED';
     return b.status === 'CANCELLED' || b.status === 'COMPLETED';
   });
@@ -105,11 +135,11 @@ export default function BookingManagementCenter() {
   const handleUpdateStatus = async (id: string, status: BookingStatus) => {
     setIsUpdating(true);
     try {
-      await updateDoc(doc(db, 'bookings', id), { status });
+      const { error } = await supabase.from('bookings').update({ status }).eq('id', id);
+      if (error) throw error;
+      
       toast.success(`Booking ${status.toLowerCase()} successfully.`);
-      if (selectedBooking?.id === id) {
-        setSelectedBooking(prev => prev ? { ...prev, status } : null);
-      }
+      fetchBookings();
     } catch (err) {
       toast.error('Failed to update status.');
     } finally {
@@ -203,21 +233,21 @@ export default function BookingManagementCenter() {
                             }`}>
                               {booking.status}
                             </span>
-                            {booking.status === 'PENDING' && !booking.paymentReceiptUrl && (
+                            {booking.status === 'PENDING' && !booking.payment_receipt_url && (
                                <span className="bg-red-500 text-white px-2 py-1 rounded-full text-[7px] font-black uppercase animate-pulse">NO RECEIPT</span>
                             )}
                          </div>
                          <span className="font-mono text-[10px] text-slate-600 tracking-tighter">ID: {booking.id.slice(-6).toUpperCase()}</span>
                       </div>
-                      <h4 className="text-2xl font-display font-black tracking-tighter uppercase italic text-white group-hover:text-lime transition-colors">{booking.userName || 'GUEST'}</h4>
+                      <h4 className="text-2xl font-display font-black tracking-tighter uppercase italic text-white group-hover:text-lime transition-colors">{booking.user_name || 'GUEST'}</h4>
                       <div className="flex items-center gap-3 mt-4 mt-2">
                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
                             <Clock size={12} className="text-lime" />
-                            {format(booking.startTime.toDate(), 'HH:mm')}
+                            {format(new Date(booking.start_time), 'HH:mm')}
                          </div>
                          <div className="w-1 h-1 rounded-full bg-white/10" />
                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate max-w-[150px]">
-                            {booking.courtName}
+                            {booking.court_name}
                          </div>
                       </div>
                     </motion.button>
@@ -255,14 +285,14 @@ export default function BookingManagementCenter() {
                                TXN://{selectedBooking.id.toUpperCase()}
                             </div>
                             <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">
-                               Received {format(selectedBooking.startTime.toDate(), 'MMM d, yyyy')}
+                               Received {format(new Date(selectedBooking.start_time), 'MMM d, yyyy')}
                             </span>
                          </div>
                       </div>
                       
                       <div className="space-y-4">
                          <h2 className="text-8xl font-display font-black uppercase italic tracking-tighter leading-[0.8] text-white">
-                            {selectedBooking.userName || 'UNIDENTIFIED'}
+                            {selectedBooking.user_name || 'UNIDENTIFIED'}
                          </h2>
                          <p className="text-[12px] font-black text-lime uppercase tracking-[0.5em] pl-1">Authorized Athlete Profile</p>
                       </div>
@@ -272,15 +302,15 @@ export default function BookingManagementCenter() {
                        <div className="p-10 glass rounded-[44px] border-white/10 bg-white/[0.02] flex flex-col justify-between h-56">
                           <p className="text-[11px] font-black text-slate-500 uppercase tracking-[0.3em]">Sector</p>
                           <div>
-                            <h4 className="text-3xl font-display font-black italic tracking-tighter text-white uppercase">{selectedBooking.courtName}</h4>
-                            <p className="text-[10px] font-bold text-lime uppercase tracking-widest mt-2">{selectedBooking.facilityName}</p>
+                            <h4 className="text-3xl font-display font-black italic tracking-tighter text-white uppercase">{selectedBooking.court_name}</h4>
+                            <p className="text-[10px] font-bold text-lime uppercase tracking-widest mt-2">{selectedBooking.facility_name}</p>
                           </div>
                        </div>
                        <div className="p-10 glass rounded-[44px] border-white/10 bg-white/[0.02] flex flex-col justify-between h-56">
                           <p className="text-[11px] font-black text-slate-500 uppercase tracking-[0.3em]">Timeline</p>
                           <div>
                             <h4 className="text-3xl font-display font-black italic tracking-tighter text-white uppercase">
-                               {format(selectedBooking.startTime.toDate(), 'HH:mm')}
+                               {format(new Date(selectedBooking.start_time), 'HH:mm')}
                             </h4>
                             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2">DUR: 60 MINS</p>
                           </div>
@@ -288,18 +318,18 @@ export default function BookingManagementCenter() {
                        <div className="p-10 glass rounded-[44px] border-white/10 bg-white/[0.02] flex flex-col justify-between h-56 group hover:border-lime/40 transition-colors">
                           <p className="text-[11px] font-black text-slate-500 uppercase tracking-[0.3em]">Revenue</p>
                           <div>
-                            <h4 className="text-4xl font-display font-black italic tracking-tighter text-lime">₱{(selectedBooking.amount || selectedBooking.totalPrice || 0).toLocaleString()}</h4>
+                            <h4 className="text-4xl font-display font-black italic tracking-tighter text-lime">₱{(selectedBooking.amount || selectedBooking.total_price || 0).toLocaleString()}</h4>
                             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2 group-hover:text-white transition-colors">Digital Settlement Complete</p>
                           </div>
                        </div>
                     </div>
 
-                    {selectedBooking.paymentReceiptUrl && (
+                    {selectedBooking.payment_receipt_url && (
                        <div className="space-y-6">
                           <p className="text-[11px] font-black text-slate-500 uppercase tracking-[0.3em]">Verification Evidence</p>
                           <div className="glass rounded-[48px] border-white/10 overflow-hidden relative group aspect-video lg:aspect-[21/9]">
                              <img 
-                               src={selectedBooking.paymentReceiptUrl} 
+                               src={selectedBooking.payment_receipt_url} 
                                alt="Payment Receipt" 
                                className="w-full h-full object-contain bg-black/50"
                              />
@@ -308,7 +338,7 @@ export default function BookingManagementCenter() {
                              </div>
                           </div>
                           <button 
-                            onClick={() => window.open(selectedBooking.paymentReceiptUrl, '_blank')}
+                            onClick={() => window.open(selectedBooking.payment_receipt_url, '_blank')}
                             className="bg-white/5 border border-white/10 text-white/40 hover:text-white px-8 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all"
                           >
                              Open Full Resolution

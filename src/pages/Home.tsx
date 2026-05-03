@@ -1,21 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, getDocs, limit, where } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { Link, useNavigate } from 'react-router-dom';
 import { MapPin, Star, Clock, Activity, Zap, Search, ChevronRight } from 'lucide-react';
 import { motion } from 'motion/react';
 import DiscoveryMap from '../components/DiscoveryMap';
 import Selector from '../components/Selector';
-
-interface Facility {
-  id: string;
-  name: string;
-  type: string;
-  address: string;
-  images: string[];
-  lat: number;
-  lng: number;
-}
+import { Facility } from '../types';
 
 export default function Home() {
   const [facilities, setFacilities] = useState<Facility[]>([]);
@@ -51,7 +41,6 @@ export default function Home() {
         },
         (error) => {
           console.error("Geolocation error:", error);
-          // Fallback handled by DiscoveryMap default center
         }
       );
     }
@@ -60,27 +49,16 @@ export default function Home() {
   useEffect(() => {
     async function fetchFacilities() {
       try {
-        const q = query(collection(db, 'facilities'), where('isVerified', '==', true), limit(20));
-        const querySnapshot = await getDocs(q);
+        const { data, error } = await supabase
+          .from('facilities')
+          .select('*')
+          .limit(20);
         
-        let fetched: any[] = [];
-        if (querySnapshot.empty) {
-          const fallbackQ = query(collection(db, 'facilities'), limit(20));
-          const fallbackSnap = await getDocs(fallbackQ);
-          fetched = fallbackSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        } else {
-          fetched = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        }
-        setFacilities(fetched.filter(f => f.status !== 'DEACTIVATED' && f.isActive !== false) as Facility[]);
+        if (error) throw error;
+        
+        setFacilities((data || []).filter(f => f.status !== 'DEACTIVATED') as Facility[]);
       } catch (error) {
-        // Fallback for index issues or other errors
-        const q = query(collection(db, 'facilities'), limit(20));
-        const querySnapshot = await getDocs(q);
-        const fetched = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as any[];
-        setFacilities(fetched.filter(f => f.status !== 'DEACTIVATED' && f.isActive !== false) as Facility[]);
+        console.error('Error fetching facilities:', error);
       } finally {
         setLoading(false);
       }

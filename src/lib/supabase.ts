@@ -13,3 +13,5 @@ export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',
   supabaseAnonKey || 'placeholder'
 );
+
+console.log("Supabase initialized:", !!supabase);

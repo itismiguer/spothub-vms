@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, getDocs, limit } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, MessageSquare, User, Building2, Search, ArrowLeft, Zap, Check, CheckCheck, Loader2, Sparkles } from 'lucide-react';
@@ -9,21 +8,21 @@ import { toast } from 'sonner';
 
 interface Chat {
   id: string;
-  playerId: string;
-  facilityId: string;
-  facilityName: string;
-  playerName: string;
-  lastMessage?: string;
-  lastTimestamp?: any;
-  unreadCountPlayer?: number;
-  unreadCountOwner?: number;
+  player_id: string;
+  facility_id: string;
+  facility_name: string;
+  player_name: string;
+  last_message?: string;
+  last_timestamp?: string;
+  unread_count_player?: number;
+  unread_count_owner?: number;
 }
 
 interface Message {
   id: string;
   text: string;
-  senderId: string;
-  timestamp: any;
+  sender_id: string;
+  created_at: string;
 }
 
 const QUICK_REPLIES = [
@@ -51,20 +50,41 @@ export default function Messages() {
   useEffect(() => {
     if (!user) return;
 
-    const q = isOwner
-      ? query(collection(db, 'chats'), where('facilityOwnerId', '==', user.uid), orderBy('lastTimestamp', 'desc'))
-      : query(collection(db, 'chats'), where('playerId', '==', user.uid), orderBy('lastTimestamp', 'desc'));
+    async function fetchChats() {
+      try {
+        let query = supabase
+          .from('chats')
+          .select('*')
+          .order('last_timestamp', { ascending: false });
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const chatList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Chat));
-      setChats(chatList);
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'chats', false);
-      setLoading(false);
-    });
+        if (isOwner) {
+          query = query.eq('facility_owner_id', user.id);
+        } else {
+          query = query.eq('player_id', user.id);
+        }
 
-    return () => unsubscribe();
+        const { data, error } = await query;
+        if (error) throw error;
+        setChats(data as Chat[]);
+        setLoading(false);
+      } catch (error) {
+        console.error('Error fetching chats:', error);
+        setLoading(false);
+      }
+    }
+
+    fetchChats();
+
+    // Subscribe to chat changes
+    const chatSubscription = supabase.channel('chats-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chats' }, () => {
+        fetchChats();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(chatSubscription);
+    };
   }, [user, isOwner]);
 
   // Fetch Messages for Active Chat
@@ -74,27 +94,45 @@ export default function Messages() {
       return;
     }
 
-    const q = query(
-      collection(db, 'chats', activeChat.id, 'messages'),
-      orderBy('timestamp', 'asc')
-    );
+    async function fetchMessages() {
+      try {
+        const { data, error } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('chat_id', activeChat.id)
+          .order('created_at', { ascending: true });
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
-      setMessages(msgList);
-      scrollToBottom();
-      
-      // Reset unread count
-      if (isOwner && activeChat.unreadCountOwner && activeChat.unreadCountOwner > 0) {
-        updateDoc(doc(db, 'chats', activeChat.id), { unreadCountOwner: 0 });
-      } else if (!isOwner && activeChat.unreadCountPlayer && activeChat.unreadCountPlayer > 0) {
-        updateDoc(doc(db, 'chats', activeChat.id), { unreadCountPlayer: 0 });
+        if (error) throw error;
+        setMessages(data as Message[]);
+        scrollToBottom();
+        
+        // Reset unread count
+        if (isOwner && activeChat.unread_count_owner && activeChat.unread_count_owner > 0) {
+          await supabase.from('chats').update({ unread_count_owner: 0 }).eq('id', activeChat.id);
+        } else if (!isOwner && activeChat.unread_count_player && activeChat.unread_count_player > 0) {
+          await supabase.from('chats').update({ unread_count_player: 0 }).eq('id', activeChat.id);
+        }
+      } catch (error) {
+        console.error('Error fetching messages:', error);
       }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `chat_${activeChat.id}_messages`, false);
-    });
+    }
 
-    return () => unsubscribe();
+    fetchMessages();
+
+    // Subscribe to new messages
+    const messageSubscription = supabase.channel(`messages-${activeChat.id}`)
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${activeChat.id}` }, 
+        (payload) => {
+          setMessages(prev => [...prev, payload.new as Message]);
+          scrollToBottom();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(messageSubscription);
+    };
   }, [activeChat, isOwner]);
 
   const scrollToBottom = () => {
@@ -108,26 +146,29 @@ export default function Messages() {
     
     setSending(true);
     try {
-      await addDoc(collection(db, 'chats', activeChat.id, 'messages'), {
-        text: text.trim(),
-        senderId: user.uid,
-        timestamp: serverTimestamp()
-      });
+      const { error: msgError } = await supabase
+        .from('messages')
+        .insert({
+          chat_id: activeChat.id,
+          text: text.trim(),
+          sender_id: user.id
+        });
+
+      if (msgError) throw msgError;
 
       const updateData: any = {
-        lastMessage: text.trim(),
-        lastTimestamp: serverTimestamp()
+        last_message: text.trim(),
+        last_timestamp: new Date().toISOString()
       };
 
       if (isOwner) {
-        updateData.unreadCountPlayer = (activeChat.unreadCountPlayer || 0) + 1;
+        updateData.unread_count_player = (activeChat.unread_count_player || 0) + 1;
       } else {
-        updateData.unreadCountOwner = (activeChat.unreadCountOwner || 0) + 1;
+        updateData.unread_count_owner = (activeChat.unread_count_owner || 0) + 1;
       }
 
-      await updateDoc(doc(db, 'chats', activeChat.id), updateData);
+      await supabase.from('chats').update(updateData).eq('id', activeChat.id);
       setNewMessage('');
-      scrollToBottom();
     } catch (error) {
       toast.error('Message failed to launch.');
     } finally {
@@ -160,47 +201,47 @@ export default function Messages() {
               </div>
            </header>
            
-           <div className="flex-1 overflow-y-auto no-scrollbar p-6 space-y-4">
-              {chats.length > 0 ? chats.map((chat) => {
-                const unread = isOwner ? chat.unreadCountOwner : chat.unreadCountPlayer;
-                const isActive = activeChat?.id === chat.id;
-                
-                return (
-                  <motion.button
-                    key={chat.id}
-                    onClick={() => setActiveChat(chat)}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className={`w-full p-6 rounded-[32px] border text-left transition-all relative overflow-hidden group ${
-                      isActive ? 'bg-lime/10 border-lime/40' : 'bg-white/5 border-white/10'
-                    }`}
-                  >
-                    <div className="flex gap-4 items-center">
-                       <div className="w-14 h-14 glass rounded-2xl flex items-center justify-center border-white/10 text-lime shrink-0">
-                          {isOwner ? <User size={24} /> : <Building2 size={24} />}
+            <div className="flex-1 overflow-y-auto no-scrollbar p-6 space-y-4">
+               {chats.length > 0 ? chats.map((chat) => {
+                 const unread = isOwner ? chat.unread_count_owner : chat.unread_count_player;
+                 const isActive = activeChat?.id === chat.id;
+                 
+                 return (
+                   <motion.button
+                     key={chat.id}
+                     onClick={() => setActiveChat(chat)}
+                     whileHover={{ scale: 1.02 }}
+                     whileTap={{ scale: 0.98 }}
+                     className={`w-full p-6 rounded-[32px] border text-left transition-all relative overflow-hidden group ${
+                       isActive ? 'bg-lime/10 border-lime/40' : 'bg-white/5 border-white/10'
+                     }`}
+                   >
+                     <div className="flex gap-4 items-center">
+                        <div className="w-14 h-14 glass rounded-2xl flex items-center justify-center border-white/10 text-lime shrink-0">
+                           {isOwner ? <User size={24} /> : <Building2 size={24} />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                           <div className="flex justify-between items-start mb-1">
+                              <h4 className="font-display font-black uppercase italic text-sm truncate mr-2">
+                                {isOwner ? chat.player_name : chat.facility_name}
+                              </h4>
+                              {chat.last_timestamp && (
+                                <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest whitespace-nowrap">
+                                  {format(new Date(chat.last_timestamp), 'HH:mm')}
+                                </span>
+                              )}
+                           </div>
+                           <p className={`text-[10px] font-medium truncate ${isActive ? 'text-white/60' : 'text-slate-400'}`}>
+                             {chat.last_message || 'Initial contact started...'}
+                           </p>
+                        </div>
+                     </div>
+                     {unread && unread > 0 && (
+                       <div className="absolute top-6 right-6 w-5 h-5 bg-lime text-charcoal rounded-full flex items-center justify-center text-[9px] font-black italic shadow-lg shadow-lime/20">
+                         {unread}
                        </div>
-                       <div className="flex-1 min-w-0">
-                          <div className="flex justify-between items-start mb-1">
-                             <h4 className="font-display font-black uppercase italic text-sm truncate mr-2">
-                               {isOwner ? chat.playerName : chat.facilityName}
-                             </h4>
-                             {chat.lastTimestamp && (
-                               <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest whitespace-nowrap">
-                                 {format(chat.lastTimestamp.toDate(), 'HH:mm')}
-                               </span>
-                             )}
-                          </div>
-                          <p className={`text-[10px] font-medium truncate ${isActive ? 'text-white/60' : 'text-slate-400'}`}>
-                            {chat.lastMessage || 'Initial contact started...'}
-                          </p>
-                       </div>
-                    </div>
-                    {unread && unread > 0 && (
-                      <div className="absolute top-6 right-6 w-5 h-5 bg-lime text-charcoal rounded-full flex items-center justify-center text-[9px] font-black italic shadow-lg shadow-lime/20">
-                        {unread}
-                      </div>
-                    )}
-                  </motion.button>
+                     )}
+                   </motion.button>
                 );
               }) : (
                 <div className="text-center py-20 px-10">
@@ -227,7 +268,7 @@ export default function Messages() {
                      </div>
                      <div>
                         <h3 className="text-2xl font-display font-black uppercase italic tracking-tighter leading-none">
-                          {isOwner ? activeChat.playerName : activeChat.facilityName}
+                          {isOwner ? activeChat.player_name : activeChat.facility_name}
                         </h3>
                         <div className="flex items-center gap-2 mt-1">
                            <div className="w-1.5 h-1.5 rounded-full bg-lime animate-pulse" />
@@ -242,7 +283,7 @@ export default function Messages() {
                   <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[radial-gradient(circle_at_center,_#b5f55a_1px,_transparent_1px)] bg-[size:32px_32px]" />
                   
                   {messages.map((msg, i) => {
-                    const isMe = msg.senderId === user?.uid;
+                    const isMe = msg.sender_id === user?.id;
                     return (
                       <motion.div
                         key={msg.id}
@@ -257,7 +298,7 @@ export default function Messages() {
                          }`}>
                             {msg.text}
                             <div className={`text-[8px] font-black uppercase tracking-widest mt-3 flex items-center gap-2 ${isMe ? 'text-charcoal/40' : 'text-white/20'}`}>
-                               {msg.timestamp ? format(msg.timestamp.toDate(), 'HH:mm') : 'Syncing...'}
+                               {msg.created_at ? format(new Date(msg.created_at), 'HH:mm') : 'Syncing...'}
                                {isMe && <CheckCheck size={10} />}
                             </div>
                          </div>

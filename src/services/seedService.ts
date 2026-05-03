@@ -1,19 +1,21 @@
-import { collection, doc, setDoc, addDoc, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 
 export const seedDemoData = async (userEmail: string, userId: string) => {
   try {
     console.log('Starting seed process...');
 
-    // 1. Update/Ensure User Role
-    const userRef = doc(db, 'users', userId);
-    await setDoc(userRef, {
-      uid: userId,
-      email: userEmail,
-      name: 'System Admin',
-      role: 'ADMIN',
-      createdAt: serverTimestamp()
-    }, { merge: true });
+    // 1. Update/Ensure User Profile
+    const { error: profileError } = await supabase
+      .from('users')
+      .upsert({
+        id: userId,
+        email: userEmail,
+        name: 'System Admin',
+        role: 'ADMIN',
+        created_at: new Date().toISOString()
+      });
+
+    if (profileError) throw profileError;
 
     // 2. Define Facilities
     const dummyFacilities = [
@@ -25,8 +27,7 @@ export const seedDemoData = async (userEmail: string, userId: string) => {
         lat: 9.3068,
         lng: 123.3011,
         images: ['https://images.unsplash.com/photo-1626225454341-3343160a2b53?auto=format&fit=crop&q=80&w=1200'],
-        ownerId: userId,
-        createdAt: serverTimestamp()
+        owner_id: userId
       },
       {
         name: 'Boulevard Smash Courts',
@@ -35,9 +36,8 @@ export const seedDemoData = async (userEmail: string, userId: string) => {
         address: 'Rizal Boulevard, Dumaguete City, Negros Oriental',
         lat: 9.3117,
         lng: 123.3155,
-        images: ['https://images.unsplash.com/photo-1626225454341-3343160a2b53?auto=format&fit=crop&q=80&w=1200'], // Different one
-        ownerId: userId,
-        createdAt: serverTimestamp()
+        images: ['https://images.unsplash.com/photo-1521412644187-c49fa0b4e6d3?auto=format&fit=crop&q=80&w=1200'],
+        owner_id: userId
       },
       {
         name: 'Valencia Green Courts',
@@ -46,35 +46,42 @@ export const seedDemoData = async (userEmail: string, userId: string) => {
         address: 'Valencia, Negros Oriental (Near Dumaguete)',
         lat: 9.2825,
         lng: 123.2450,
-        images: ['https://images.unsplash.com/photo-1595435063435-08169992f155?auto=format&fit=crop&q=80&w=1200'],
-        ownerId: userId,
-        createdAt: serverTimestamp()
+        images: ['https://images.unsplash.com/photo-1599586120429-48281b6f0ece?auto=format&fit=crop&q=80&w=1200'],
+        owner_id: userId
       }
     ];
 
-    // Better images
-    dummyFacilities[0].images = ['https://images.unsplash.com/photo-1626225454341-3343160a2b53?auto=format&fit=crop&q=80&w=1200'];
-    dummyFacilities[1].images = ['https://images.unsplash.com/photo-1521412644187-c49fa0b4e6d3?auto=format&fit=crop&q=80&w=1200'];
-    dummyFacilities[2].images = ['https://images.unsplash.com/photo-1599586120429-48281b6f0ece?auto=format&fit=crop&q=80&w=1200'];
-
     for (const facData of dummyFacilities) {
-      // Check if already exists to avoid duplicates (optional but safer)
-      const q = query(collection(db, 'facilities'), where('name', '==', facData.name));
-      const existing = await getDocs(q);
+      // Check if already exists
+      const { data: existing } = await supabase
+        .from('facilities')
+        .select('id')
+        .eq('name', facData.name)
+        .maybeSingle();
       
-      if (existing.empty) {
-        const facRef = await addDoc(collection(db, 'facilities'), facData);
+      if (!existing) {
+        const { data: newFac, error: facError } = await supabase
+          .from('facilities')
+          .insert(facData)
+          .select()
+          .single();
         
+        if (facError) throw facError;
+
         // Add 2 courts per facility
         const courtNames = ['Main Court 1', 'Pro Court 2'];
-        for (const cName of courtNames) {
-          await addDoc(collection(db, 'facilities', facRef.id, 'courts'), {
-            facilityId: facRef.id,
-            name: cName,
-            hourlyRate: 350,
-            isActive: true
-          });
-        }
+        const courtsToInsert = courtNames.map(cName => ({
+          facility_id: newFac.id,
+          name: cName,
+          hourly_rate: 350,
+          is_active: true
+        }));
+
+        const { error: courtError } = await supabase
+          .from('courts')
+          .insert(courtsToInsert);
+
+        if (courtError) throw courtError;
       }
     }
 

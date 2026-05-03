@@ -1,41 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { doc, getDoc, collection, query, where, onSnapshot, serverTimestamp, addDoc, setDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { startOfDay } from 'date-fns';
 import { MapPin, Info, Calendar as CalendarIcon, ShieldCheck, Activity, Search, Share2, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import DiscoveryMap from '../components/DiscoveryMap';
-
-interface Facility {
-  id: string;
-  name: string;
-  type: string;
-  description: string;
-  address: string;
-  images: string[];
-  ownerId: string;
-  lat?: number;
-  lng?: number;
-  rules?: string;
-  showPublicSchedule?: boolean;
-}
-
-interface Court {
-  id: string;
-  name: string;
-  hourlyRate: number;
-}
-
-interface Booking {
-  id: string;
-  startTime: any;
-  endTime: any;
-  courtId: string;
-  status: 'CONFIRMED' | 'CANCELLED' | 'MAINTENANCE' | 'PENDING' | 'manual_block';
-}
+import { Facility, Court, Booking } from '../types';
 
 export default function VenuePage() {
   const { id } = useParams();
@@ -52,54 +24,50 @@ export default function VenuePage() {
     async function fetchVenueData() {
       if (!id) return;
       try {
-        const facilitySnap = await getDoc(doc(db, 'facilities', id));
-        if (facilitySnap.exists()) {
-          const data = facilitySnap.data() as any;
-          
-          // Redirect if deactivated and not the owner
-          if (data.status === 'DEACTIVATED' && (!user || user.uid !== data.ownerId)) {
-            toast.error('Facility Offline', {
-              description: 'The management has temporarily taken this facility offline.'
-            });
-            navigate('/');
-            return;
-          }
-          
-          setFacility({ id: facilitySnap.id, ...data } as Facility);
-          
-          // Apply branding if exists
-          if (data.brandColor) {
-            document.documentElement.style.setProperty('--brand', data.brandColor);
-          }
-        } else {
+        const { data: facilityData, error: facilityError } = await supabase
+          .from('facilities')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (facilityError || !facilityData) {
           toast.error('Venue not found');
           navigate('/');
           return;
         }
 
-        const unsubCourts = onSnapshot(collection(db, 'facilities', id, 'courts'), (snap) => {
-          setCourts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Court[]);
-        });
+        // Redirect if deactivated and not the owner
+        if (facilityData.status === 'DEACTIVATED' && (!user || user.id !== facilityData.owner_id)) {
+          toast.error('Facility Offline', {
+            description: 'The management has temporarily taken this facility offline.'
+          });
+          navigate('/');
+          return;
+        }
 
-        const bookingsQ = query(collection(db, 'bookings'), where('facilityId', '==', id));
-        const unsubBookings = onSnapshot(bookingsQ, (snap) => {
-          setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Booking[]);
-        });
+        setFacility(facilityData as Facility);
 
-        return () => {
-          unsubCourts();
-          unsubBookings();
-          document.documentElement.style.setProperty('--brand', '#B5F55A');
-        };
+        const { data: courtsData } = await supabase
+          .from('courts')
+          .select('*')
+          .eq('facility_id', id);
+        setCourts(courtsData as Court[] || []);
+
+        const { data: bookingsData } = await supabase
+          .from('bookings')
+          .select('*')
+          .eq('facility_id', id);
+        setBookings(bookingsData as Booking[] || []);
+
       } catch (error) {
-        handleFirestoreError(error, OperationType.GET, 'facility');
+        console.error('Error fetching venue data:', error);
       } finally {
         setLoading(false);
       }
     }
 
     fetchVenueData();
-  }, [id]);
+  }, [id, user, navigate]);
 
   if (loading) {
     return (
@@ -210,7 +178,7 @@ export default function VenuePage() {
                   </div>
                 </div>
                 <div className="flex items-end gap-1">
-                  <span className="text-3xl font-display font-black text-lime">${court.hourlyRate}</span>
+                  <span className="text-3xl font-display font-black text-lime">${court.hourly_rate}</span>
                   <span className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-1.5">/ hour</span>
                 </div>
                 <button 
@@ -264,9 +232,9 @@ export default function VenuePage() {
                       </div>
                       {courts.map(court => {
                         const booking = bookings.find(b => {
-                          if (b.courtId !== court.id) return false;
-                          const bStart = b.startTime.toDate ? b.startTime.toDate() : new Date(b.startTime);
-                          const bEnd = b.endTime.toDate ? b.endTime.toDate() : new Date(b.endTime);
+                          if (b.court_id !== court.id) return false;
+                          const bStart = new Date(b.start_time);
+                          const bEnd = new Date(b.end_time);
                           return (startSlot < bEnd && endSlot > bStart) && b.status !== 'CANCELLED';
                         });
 
