@@ -1,22 +1,12 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-if (!supabaseAnonKey) {
-  console.warn('Missing Anon Key');
-}
-
+// Log to the browser console so we can see if it's blank
+console.log('Checking connection setup...')
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Supabase credentials missing! Site will show MISSING KEYS.');
+  console.error('CRITICAL: Supabase variables are UNDEFINED in the build.')
 }
 
-console.log('Supabase Connection Attempted');
-console.log('Supabase URL Loaded:', !!supabaseUrl);
-
-export const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder'
-);
-
-console.log("Supabase initialized:", !!supabase);
+export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '')
