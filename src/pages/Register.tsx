@@ -225,6 +225,7 @@ export default function Register() {
                         placeholder="ROGER@CHAMPION.COM"
                         value={formData.email}
                         onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value.toLowerCase().trim() }))}
+                        style={{ textTransform: 'lowercase' }}
                         className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-medium normal-case italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/20"
                       />
                     </div>

@@ -3,10 +3,8 @@ import { createClient } from '@supabase/supabase-js'
 // Robust environment variable loader with cleaning
 const cleanEnv = (val: string | undefined): string => {
   if (!val) return '';
-  let url = val.trim().replace(/\/$/, '');
-  // Remove /rest/v1 or other common mistakes if they were accidentally added
-  url = url.replace(/\/rest\/v1\/?$/, '');
-  return url;
+  // Remove /rest/v1 or other common mistakes if they were accidentally added, then remove trailing slash
+  return val.trim().replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
 };
 
 const supabaseUrl = cleanEnv(import.meta.env.VITE_SUPABASE_URL);

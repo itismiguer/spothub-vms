@@ -40,8 +40,13 @@ export default function Home() {
           });
         },
         (error) => {
-          console.error("Geolocation error:", error);
-        }
+          // If the user denies or there's an issue, we just log it once gently
+          // and don't spam the console if it's code 1 (PERMISSION_DENIED)
+          if (error.code !== 1) {
+            console.warn("Geolocation non-critical error:", error.message);
+          }
+        },
+        { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
       );
     }
   }, []);
