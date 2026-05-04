@@ -71,13 +71,13 @@ export default function Login() {
         <form onSubmit={handleAction} className="glass p-10 rounded-[56px] border border-white/5 space-y-8 backdrop-blur-3xl shadow-[0_40px_80px_rgba(0,0,0,0.6)]">
           <div className="space-y-6">
             <div className="space-y-3">
-              <label className="text-[10px] uppercase font-black text-slate-500 tracking-[0.2em] ml-2">Email Address</label>
+              <label className="text-[10px] font-black text-slate-500 tracking-[0.2em] ml-2">Email Address</label>
               <div className="relative">
                 <Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                 <input 
                   required
                   type="email" 
-                  placeholder="Athlete Email"
+                  placeholder="ATHLETE EMAIL"
                   value={formData.email}
                   onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value.toLowerCase().trim() }))}
                   className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-medium normal-case italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/20"
@@ -86,13 +86,13 @@ export default function Login() {
             </div>
 
             <div className="space-y-3">
-              <label className="text-[10px] uppercase font-black text-slate-500 tracking-[0.2em] ml-2">Password</label>
+              <label className="text-[10px] font-black text-slate-500 tracking-[0.2em] ml-2">Password</label>
               <div className="relative">
                 <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                 <input 
                   required
                   type={showPassword ? "text" : "password"} 
-                  placeholder="••••••••"
+                  placeholder="ATHLETE PASSWORD"
                   value={formData.password}
                   onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
                   className="w-full glass border-white/10 p-5 pl-14 pr-14 rounded-3xl text-sm font-medium normal-case italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/20"
@@ -100,7 +100,7 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-5 top-1/2 -translate-y-1/2 text-lime hover:text-white transition-colors z-[100] cursor-pointer p-2"
+                  className="absolute right-5 top-1/2 -translate-y-1/2 text-lime hover:text-white transition-colors z-[100] cursor-pointer p-4"
                 >
                   {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                 </button>
