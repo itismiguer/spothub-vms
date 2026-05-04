@@ -1,15 +1,16 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+const rawUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+const supabaseUrl = rawUrl.replace(/\/$/, '');
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
 // Log to the browser console so we can see if it's blank
-console.log('Checking connection setup...')
+console.log('RESERVE: Initializing Supabase Connection...');
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('CRITICAL: Supabase variables are UNDEFINED in the build.')
+  console.error('CRITICAL ERROR: Supabase environment variables are UNDEFINED or EMPTY.');
 }
 
 export const supabase = createClient(
-  (supabaseUrl || '').trim().replace(/\/$/, ''),
-  (supabaseAnonKey || '').trim()
+  supabaseUrl,
+  supabaseAnonKey
 )

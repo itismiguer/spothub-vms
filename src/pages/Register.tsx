@@ -224,8 +224,8 @@ export default function Register() {
                         type="email" 
                         placeholder="roger@champion.com"
                         value={formData.email}
-                        onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                        className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-bold italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/10"
+                        onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value.toLowerCase() }))}
+                        className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-bold normal-case italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/10"
                       />
                     </div>
                   </div>
@@ -240,12 +240,12 @@ export default function Register() {
                         placeholder="••••••••"
                         value={formData.password}
                         onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                        className="w-full glass border-white/10 p-5 pl-14 pr-14 rounded-3xl text-sm font-bold italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/10"
+                        className="w-full glass border-white/10 p-5 pl-14 pr-14 rounded-3xl text-sm font-bold normal-case italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/10"
                       />
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
+                        className="absolute right-5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white transition-colors z-20"
                       >
                         {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                       </button>
