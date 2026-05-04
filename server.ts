@@ -83,9 +83,9 @@ async function startServer() {
   async function sendBookingEmails(id: string, booking: any) {
     if (!resend) return;
     try {
-      const { data: player } = await supabase.from('users').select('*').eq('id', booking.user_id).single();
+      const { data: player } = await supabase.from('profiles').select('*').eq('id', booking.user_id).single();
       const { data: facility } = await supabase.from('facilities').select('*').eq('id', booking.facility_id).single();
-      const { data: owner } = await supabase.from('users').select('*').eq('id', facility?.owner_id).single();
+      const { data: owner } = await supabase.from('profiles').select('*').eq('id', facility?.owner_id).single();
 
       if (player?.email && player?.notifications?.email !== false) {
         await resend.emails.send({
@@ -110,7 +110,7 @@ async function startServer() {
   async function sendResponseEmail(id: string, booking: any) {
     if (!resend) return;
     try {
-      const { data: player } = await supabase.from('users').select('*').eq('id', booking.user_id).single();
+      const { data: player } = await supabase.from('profiles').select('*').eq('id', booking.user_id).single();
       const { data: facility } = await supabase.from('facilities').select('*').eq('id', booking.facility_id).single();
 
       if (player?.email && player?.notifications?.email !== false) {
@@ -160,7 +160,7 @@ async function startServer() {
       console.log(`Sending SMS to ${bookingsDoc.length} players...`);
 
       for (const booking of bookingsDoc) {
-        const { data: player } = await supabase.from('users').select('*').eq('id', booking.user_id).single();
+        const { data: player } = await supabase.from('profiles').select('*').eq('id', booking.user_id).single();
 
         if (player?.phone && player.notifications?.sms === true) {
           await twilioClient.messages.create({
@@ -190,7 +190,7 @@ async function startServer() {
     if (!resend) return;
     try {
       const recipientId = (chat.unread_count_owner || 0) > 0 ? chat.facility_owner_id : chat.player_id;
-      const { data: recipient } = await supabase.from('users').select('*').eq('id', recipientId).single();
+      const { data: recipient } = await supabase.from('profiles').select('*').eq('id', recipientId).single();
 
       if (recipient?.email && recipient?.notifications?.email !== false) {
         await resend.emails.send({

@@ -6,7 +6,7 @@ export const seedDemoData = async (userEmail: string, userId: string) => {
 
     // 1. Update/Ensure User Profile
     const { error: profileError } = await supabase
-      .from('users')
+      .from('profiles')
       .upsert({
         id: userId,
         email: userEmail,

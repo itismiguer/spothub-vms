@@ -78,6 +78,7 @@ export default function Login() {
                   required
                   type="email" 
                   placeholder="ATHLETE EMAIL"
+                  autoCapitalize="none"
                   value={formData.email}
                   onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value.toLowerCase().trim() }))}
                   style={{ textTransform: 'lowercase' }}
@@ -101,9 +102,9 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-5 top-1/2 -translate-y-1/2 text-lime hover:text-white transition-colors z-[100] cursor-pointer p-4"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-lime transition-colors z-[100] cursor-pointer p-2 rounded-xl hover:bg-white/5"
                 >
-                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
             </div>

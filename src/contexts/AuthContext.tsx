@@ -21,8 +21,8 @@ interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
-  login: () => Promise<void>;
-  loginWithApple: () => Promise<void>;
+  login: (role?: UserRole) => Promise<void>;
+  loginWithApple: (role?: UserRole) => Promise<void>;
   loginWithEmail: (email: string, pass: string) => Promise<void>;
   registerWithEmail: (email: string, pass: string, name: string, role: UserRole, extra?: Partial<UserProfile>) => Promise<void>;
   logout: () => Promise<void>;
@@ -50,7 +50,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id, session.user.user_metadata);
+        // Check for pending role from registration
+        const pendingRole = localStorage.getItem('pending_role') as UserRole;
+        if (pendingRole) {
+          localStorage.removeItem('pending_role');
+          fetchProfile(session.user.id, { ...session.user.user_metadata, role: pendingRole });
+        } else {
+          fetchProfile(session.user.id, session.user.user_metadata);
+        }
       } else {
         setProfile(null);
         setLoading(false);
@@ -65,7 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchProfile = async (userId: string, userMetadata?: any) => {
     try {
       const { data, error } = await supabase
-        .from('users')
+        .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
@@ -81,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             created_at: new Date().toISOString()
           };
 
-          const { error: insertError } = await supabase.from('users').insert([newProfile]);
+          const { error: insertError } = await supabase.from('profiles').insert([newProfile]);
           if (insertError) {
             console.error('Error creating auto-profile:', insertError);
           } else {
@@ -100,7 +107,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const login = async () => {
+  const login = async (role?: UserRole) => {
+    if (role) {
+      localStorage.setItem('pending_role', role);
+    }
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -109,7 +119,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const loginWithApple = async () => {
+  const loginWithApple = async (role?: UserRole) => {
+    if (role) {
+      localStorage.setItem('pending_role', role);
+    }
     await supabase.auth.signInWithOAuth({
       provider: 'apple',
       options: {
@@ -147,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       newProfile.verification_status = 'pending';
     }
 
-    const { error: profileError } = await supabase.from('users').insert([newProfile]);
+    const { error: profileError } = await supabase.from('profiles').insert([newProfile]);
     if (profileError) throw profileError;
     
     setProfile(newProfile as UserProfile);
