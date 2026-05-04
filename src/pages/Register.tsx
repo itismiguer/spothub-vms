@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Activity, Star, ShieldCheck, Trophy, ArrowRight, Lock, Mail, Phone, User as UserIcon, Building2, MapPin, Upload, FileCheck, ArrowLeft } from 'lucide-react';
+import { Activity, Star, ShieldCheck, Trophy, ArrowRight, Lock, Mail, Phone, User as UserIcon, Building2, MapPin, Upload, FileCheck, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
@@ -28,6 +28,7 @@ export default function Register() {
     business_name: '',
     business_address: '',
   });
+  const [showPassword, setShowPassword] = React.useState(false);
   const [honeypot, setHoneypot] = React.useState('');
   const [file, setFile] = React.useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -70,7 +71,7 @@ export default function Register() {
         verification_doc_url = publicUrl;
       }
 
-      await registerWithEmail(formData.email, formData.password, formData.name, formData.role, {
+      await registerWithEmail(formData.email.toLowerCase().trim(), formData.password, formData.name, formData.role, {
         business_name: formData.business_name,
         business_address: formData.business_address,
         verification_doc_url,
@@ -235,12 +236,19 @@ export default function Register() {
                       <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                       <input 
                         required
-                        type="password" 
+                        type={showPassword ? "text" : "password"} 
                         placeholder="••••••••"
                         value={formData.password}
                         onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                        className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-bold italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/10"
+                        className="w-full glass border-white/10 p-5 pl-14 pr-14 rounded-3xl text-sm font-bold italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/10"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
+                      >
+                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
                     </div>
                   </div>
                 </div>

@@ -10,6 +10,6 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(
-  (supabaseUrl || '').trim(),
+  (supabaseUrl || '').trim().replace(/\/$/, ''),
   (supabaseAnonKey || '').trim()
 )
