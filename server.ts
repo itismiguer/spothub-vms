@@ -6,13 +6,21 @@ import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 import twilio from "twilio";
 import fs from "fs";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Initialize Supabase (Prefer service role for backend triggers)
-const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+const supabaseUrl = (process.env.VITE_SUPABASE_URL || "").trim().replace(/\/$/, "");
+const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "").trim();
+
+if (!supabaseUrl || !supabaseKey) {
+  console.warn("SERVER WARNING: Supabase configuration is incomplete.");
+}
+
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Initialize Notification Services
