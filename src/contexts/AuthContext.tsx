@@ -80,19 +80,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         if (error.code === 'PGRST116') {
           // Profile doesn't exist, create one (e.g. for Google Auth or missing row)
-          const newProfile: UserProfile = {
+          const userName = userMetadata?.full_name || userMetadata?.name || '';
+          const userEmail = userMetadata?.email || '';
+          
+          const newProfile: any = {
             id: userId,
-            email: userMetadata?.email || user?.email || '',
-            name: userMetadata?.full_name || userMetadata?.name || user?.email?.split('@')[0] || 'User',
+            email: userEmail,
+            name: userName || userEmail.split('@')[0] || 'Athlete',
             role: (userMetadata?.role as UserRole) || 'PLAYER',
             created_at: new Date().toISOString()
           };
 
-          const { error: insertError } = await supabase.from('profiles').insert([newProfile]);
+          const { error: insertError } = await supabase
+            .from('profiles')
+            .upsert(newProfile, { onConflict: 'id' });
+
           if (insertError) {
             console.error('Error creating auto-profile:', insertError);
+            // Fallback: set local profile so UI doesn't break
+            setProfile(newProfile as UserProfile);
           } else {
-            setProfile(newProfile);
+            setProfile(newProfile as UserProfile);
           }
         } else {
           console.error('Error fetching profile:', error);

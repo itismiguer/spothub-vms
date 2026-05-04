@@ -111,7 +111,17 @@ export default function Profile() {
     }
   };
 
-  if (!user || !profile) return null;
+  if (!user) return null;
+
+  // Show a mini loader if user exists but profile is still syncing
+  if (!profile) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center text-white space-y-6">
+        <Activity className="text-lime animate-pulse" size={48} />
+        <p className="text-sm font-bold uppercase tracking-widest text-white/40">Syncing Identity...</p>
+      </div>
+    );
+  }
 
   const isSuperAdmin = user.email === 'miguel@builtbymiguel.net' || profile.role === 'ADMIN';
 
@@ -154,7 +164,7 @@ export default function Profile() {
             
             <div className="relative">
               <div className="w-24 h-24 bg-lime rounded-3xl flex items-center justify-center text-charcoal text-4xl font-black italic shadow-[0_0_30px_rgba(181,245,90,0.3)]">
-                {profile.name[0]}
+                {(profile.name || '?')[0]}
               </div>
               <div className="absolute -bottom-2 -right-2 glass p-2 rounded-xl text-lime border border-white/10">
                 <Shield size={16} />
@@ -171,10 +181,10 @@ export default function Profile() {
                     onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                    />
                  ) : (
-                   <h2 className="text-3xl font-display font-black uppercase italic tracking-tight">{profile.name}</h2>
+                   <h2 className="text-3xl font-display font-black uppercase italic tracking-tight">{profile.name || 'Athlete'}</h2>
                  )}
                  <p className="text-white/40 text-xs font-bold flex items-center gap-2 uppercase tracking-widest leading-none">
-                    <Mail size={12} className="text-lime" /> {profile.email}
+                    <Mail size={12} className="text-lime" /> {profile.email || 'No Email'}
                  </p>
               </div>
               
