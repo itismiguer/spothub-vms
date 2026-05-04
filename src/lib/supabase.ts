@@ -9,4 +9,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error('CRITICAL: Supabase variables are UNDEFINED in the build.')
 }
 
-export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '')
+export const supabase = createClient(
+  (supabaseUrl || '').trim(),
+  (supabaseAnonKey || '').trim()
+)

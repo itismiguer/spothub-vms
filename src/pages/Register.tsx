@@ -221,10 +221,10 @@ export default function Register() {
                       <input 
                         required
                         type="email" 
-                        placeholder="ROGER@CHAMPION.COM"
+                        placeholder="roger@champion.com"
                         value={formData.email}
                         onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                        className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-black uppercase italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/10"
+                        className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-bold italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/10"
                       />
                     </div>
                   </div>
@@ -239,7 +239,7 @@ export default function Register() {
                         placeholder="••••••••"
                         value={formData.password}
                         onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                        className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-black uppercase italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/10"
+                        className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-bold italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/10"
                       />
                     </div>
                   </div>
