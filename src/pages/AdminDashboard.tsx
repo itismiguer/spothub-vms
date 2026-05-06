@@ -1,972 +1,569 @@
-import React, { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
-import { Shield, Users, Building2, TrendingUp, Search, MoreVertical, CheckCircle, XCircle, Database, Loader2, Star, Eye, EyeOff, MessageCircle, Settings, Plus, ShieldCheck, FileText, ChevronDown, Bell, Clock, ShieldAlert, DollarSign, BarChart3 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useNavigate } from 'react-router-dom';
+import { 
+  Shield, 
+  DollarSign, 
+  TrendingUp, 
+  AlertCircle, 
+  CheckCircle2, 
+  Eye, 
+  Search, 
+  Mail, 
+  Building2, 
+  Loader2, 
+  ArrowUpRight,
+  User,
+  History,
+  Activity,
+  ChevronDown,
+  X
+} from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area } from 'recharts';
-import { seedDemoData } from '../services/seedService';
-import { useAuth } from '../contexts/AuthContext';
-import Selector from '../components/Selector';
+import { createNotification } from '../lib/notifications';
+import NotificationBell from '../components/NotificationBell';
 
-interface UserProfile {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
-  business_name?: string;
-  business_address?: string;
-  kyc_url?: string;
-  verification_status?: 'pending' | 'verified' | 'rejected';
-}
-
-interface Facility {
-  id: string;
-  name: string;
-  type: string;
-  owner_id: string;
-  address?: string;
-  created_at?: string;
-  isActive?: boolean;
-}
-
-interface Review {
-  id: string;
-  facility_id: string;
-  facility_name?: string;
-  user_name: string;
-  rating: number;
-  comment: string;
-  hidden: boolean;
-  created_at: string;
-  owner_reply?: { text: string; updated_at: string };
-}
-
-interface SystemSettings {
-  global_sms_enabled: boolean;
-}
-
-interface Booking {
-  id: string;
-  facility_id: string;
-  court_name: string;
-  user_name: string;
-  start_time: string;
-  end_time: string;
-  status: string;
-  booking_reference: string;
-}
+type AdminTab = 'overview' | 'verifications' | 'venues' | 'users' | 'payouts';
 
 export default function AdminDashboard() {
-  const { user, profile } = useAuth();
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'facilities' | 'reviews' | 'verification' | 'settings' | 'bookings' | 'notifications'>('overview');
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [facilities, setFacilities] = useState<Facility[]>([]);
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [revenueLogs, setRevenueLogs] = useState<any[]>([]);
-  const [notifications, setNotifications] = useState<any[]>([]);
-  const [systemSettings, setSystemSettings] = useState<SystemSettings>({ global_sms_enabled: true });
+  const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [loading, setLoading] = useState(true);
-  const [isSeeding, setIsSeeding] = useState(false);
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  
+  // Data State
+  const [stats, setStats] = useState({ totalRevenue: 0, commission: 0, pendingBookings: 0, pendingVenues: 0, pendingPayouts: 0 });
+  const [pendingBookings, setPendingBookings] = useState<any[]>([]);
+  const [pendingVenues, setPendingVenues] = useState<any[]>([]);
+  const [pendingWithdrawals, setPendingWithdrawals] = useState<any[]>([]);
 
-  // Role Guard
-  const isSuperAdmin = profile?.role === 'super_admin';
+  const [userSearch, setUserSearch] = useState('');
+  const [foundUser, setFoundUser] = useState<any>(null);
+  const [userBookings, setUserBookings] = useState<any[]>([]);
+  const [searchingUser, setSearchingUser] = useState(false);
+  const [viewingProof, setViewingProof] = useState<string | null>(null);
 
-  const handleToggleGlobalSms = async () => {
-    try {
-      const newValue = !systemSettings.global_sms_enabled;
-      const { error } = await supabase
-        .from('system_settings')
-        .update({ global_sms_enabled: newValue, updated_at: new Date().toISOString() })
-        .eq('id', 'global');
-      
-      if (error) throw error;
-      setSystemSettings({ ...systemSettings, global_sms_enabled: newValue });
-      toast.success(`Global SMS ${newValue ? 'Enabled' : 'Disabled'}`, {
-        icon: newValue ? '💬' : '🔇'
-      });
-    } catch (error) {
-      toast.error('Failed to update system settings.');
-    }
-  };
+  useEffect(() => {
+    fetchInitialData();
+  }, []);
 
-  const handleToggleFacilityStatus = async (facId: string, currentStatus: boolean) => {
-    try {
-      const { error } = await supabase
-        .from('facilities')
-        .update({ is_active: !currentStatus })
-        .eq('id', facId);
-      
-      if (error) throw error;
-      setFacilities(prev => prev.map(f => f.id === facId ? { ...f, isActive: !currentStatus } : f));
-      toast.success(`Facility ${!currentStatus ? 'Activated' : 'Locked Down'}`);
-    } catch (error) {
-      toast.error('Failed to update facility status.');
-    }
-  };
-
-  const handleBookingManualStatus = async (bookingId: string, newStatus: string) => {
-    try {
-      const { error } = await supabase
-        .from('bookings')
-        .update({ status: newStatus, manual_override: true, overridden_by: user?.id })
-        .eq('id', bookingId);
-      
-      if (error) throw error;
-      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: newStatus } : b));
-      
-      const targetBooking = bookings.find(b => b.id === bookingId);
-      if (targetBooking && (targetBooking as any).user_id) {
-        await supabase.from('notifications').insert({
-          user_id: (targetBooking as any).user_id,
-          title: `Booking ${newStatus}`,
-          message: `Your reservation ${targetBooking.booking_reference} status has been updated to ${newStatus} by the Super Admin.`,
-          type: newStatus === 'CONFIRMED' ? 'booking_confirmed' : 'booking_expired',
-          read: false,
-          related_id: bookingId
-        });
-      }
-
-      toast.success(`Booking status forced to ${newStatus}`);
-    } catch (error) {
-      toast.error('Override failed.');
-    }
-  };
-
-  const pendingVerificationUsers = users.filter(u => u.verification_status === 'pending');
-
-  const handleVerifyUser = async (uid: string, status: 'verified' | 'rejected') => {
-    try {
-      const { error: userError } = await supabase
-        .from('profiles')
-        .update({ 
-          verification_status: status,
-          verified_at: new Date().toISOString()
-        })
-        .eq('id', uid);
-      
-      if (userError) throw userError;
-
-      const { error: facError } = await supabase
-        .from('facilities')
-        .update({ 
-          is_verified: status === 'verified',
-          verification_status: status 
-        })
-        .eq('owner_id', uid);
-        
-      if (facError) throw facError;
-
-      setUsers(prev => prev.map(u => u.id === uid ? { ...u, verification_status: status } : u));
-      toast.success(`User verification: ${status.toUpperCase()}`);
-    } catch (error) {
-      console.error("Verification update error:", error);
-      toast.error('Failed to update verification status.');
-    }
-  };
-
-  const [newFac, setNewFac] = useState({ name: '', type: 'Pickleball', ownerId: '', address: '', lat: 9.3068, lng: 123.3039 });
-
-  const fetchData = async () => {
+  const fetchInitialData = async () => {
     setLoading(true);
     try {
-      const { data: usersData } = await supabase.from('profiles').select('*');
-      setUsers(usersData as UserProfile[] || []);
+      const { data: bks, error: bksErr } = await supabase.from('bookings').select('*, profiles(name, email), venues(name)').eq('payment_status', 'pending');
+      const { data: vns, error: vnsErr } = await supabase.from('venues').select('*').eq('status', 'PENDING');
+      const { data: totalData, error: totalErr } = await supabase.from('bookings').select('total_price').eq('payment_status', 'paid');
+      const { data: payouts, error: payoutsErr } = await supabase.from('withdrawal_requests').select('*, profiles(name, email, business_name)').neq('status', 'completed');
 
-      const { data: facilitiesData } = await supabase.from('facilities').select('*');
-      setFacilities(facilitiesData as Facility[] || []);
+      if (bksErr || vnsErr || totalErr || payoutsErr) throw new Error('Refresh failed');
 
-      const { data: reviewsData } = await supabase.from('reviews').select('*');
-      const formattedReviews = (reviewsData || []).map(r => ({
-        ...r,
-        facility_name: facilitiesData?.find(f => f.id === r.facility_id)?.name || 'Unknown Facility'
-      }));
-      setReviews(formattedReviews.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
-
-      const { data: settingsData } = await supabase.from('system_settings').select('*').eq('id', 'global').single();
-      if (settingsData) {
-        setSystemSettings(settingsData as SystemSettings);
-      } else {
-        const initialSettings = { id: 'global', global_sms_enabled: true };
-        await supabase.from('system_settings').insert(initialSettings);
-        setSystemSettings(initialSettings as any);
-      }
-
-      const { data: bookingData } = await supabase.from('bookings').select('*');
-      setBookings(bookingData as Booking[] || []);
-
-      const { data: revData } = await supabase.from('revenue_logs').select('*').order('created_at', { ascending: true });
-      setRevenueLogs(revData || []);
-
-      const { data: notificationsData } = await supabase.from('notifications').select('*').limit(50);
-      setNotifications(notificationsData || []);
-
-    } catch (error) {
-      console.error("Admin data fetch error:", error);
+      setPendingBookings(bks || []);
+      setPendingVenues(vns || []);
+      setPendingWithdrawals(payouts || []);
+      
+      const totalRev = totalData?.reduce((acc, curr) => acc + (curr.total_price || 0), 0) || 0;
+      setStats({
+        totalRevenue: totalRev,
+        commission: totalRev * 0.05,
+        pendingBookings: bks?.length || 0,
+        pendingVenues: vns?.length || 0,
+        pendingPayouts: payouts?.filter((p: any) => p.status === 'pending').length || 0
+      });
+    } catch (err) {
+      toast.error('Failed to load admin data');
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (profile) {
-      fetchData();
-    }
-  }, [profile]);
-
-  const handleSeedData = async () => {
-    if (!user) return;
-    setIsSeeding(true);
+  const completePayout = async (withdrawal: any) => {
     try {
-      await seedDemoData(user.email || '', user.id);
-      toast.success('Demo data initialized successfully!');
-      fetchData();
-    } catch (error) {
-      toast.error('Failed to initialize demo data.');
-    } finally {
-      setIsSeeding(false);
-    }
-  };
+      // 1. Update withdrawal request
+      await supabase
+        .from('withdrawal_requests')
+        .update({ status: 'completed', processed_at: new Date().toISOString() })
+        .eq('id', withdrawal.id);
 
-  const handleRegisterFacility = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsRegistering(true);
-    try {
-      const { error } = await supabase.from('facilities').insert({
-        name: newFac.name,
-        type: newFac.type,
-        owner_id: newFac.ownerId,
-        address: newFac.address,
-        latitude: newFac.lat,
-        longitude: newFac.lng,
-        is_verified: true,
-        verification_status: 'verified',
-        images: ['https://images.unsplash.com/photo-1599586120429-48281b6f0ece?auto=format&fit=crop&q=80&w=800']
+      // 2. Update ledger records
+      await supabase
+        .from('ledger')
+        .update({ status: 'paid', withdrawal_id: withdrawal.id })
+        .eq('owner_id', withdrawal.owner_id)
+        .eq('status', 'payout_scheduled');
+
+      // 3. Notify Owner
+      await createNotification({
+        userId: withdrawal.owner_id,
+        title: "Payout Disbursed!",
+        message: `Your payout of ${withdrawal.currency_code} ${withdrawal.amount.toLocaleString()} has been processed and sent to your account.`,
+        type: "SYSTEM",
+        link: "/owner/earnings"
       });
+
+      toast.success('Payout marked as COMPLETED');
+      fetchInitialData();
+    } catch (err) {
+      toast.error('Failed to complete payout');
+    }
+  };
+
+  const approveBooking = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('bookings')
+        .update({ payment_status: 'paid', status: 'CONFIRMED' })
+        .eq('id', id);
+
       if (error) throw error;
-      toast.success('New facility registered successfully.');
-      setNewFac({ name: '', type: 'Pickleball', ownerId: '', address: '', lat: 9.3068, lng: 123.3039 });
-      fetchData();
-    } catch (error) {
-      toast.error('Failed to register facility.');
+
+      // 1. Fetch booking again with venue context for notification and ledger
+      const { data: bk } = await supabase.from('bookings').select('*, venues(name, owner_id)').eq('id', id).single();
+      
+      if (bk) {
+        // --- LEDGER INSERTION ---
+        const amount = bk.total_price || 0;
+        const platformFee = amount * 0.05;
+        const ownerRevenue = amount * 0.95;
+
+        await supabase.from('ledger').insert({
+          booking_id: bk.id,
+          facility_id: bk.facility_id,
+          owner_id: bk.venues?.owner_id,
+          total_amount: amount,
+          platform_fee: platformFee,
+          owner_amount: ownerRevenue,
+          status: 'pending', // Pending payout
+          currency_code: bk.currency_code || 'PHP'
+        });
+
+        // 2. Notify User 
+        await createNotification({
+          userId: bk.user_id,
+          title: "Payment Verified!",
+          message: `Your booking at ${bk.venues?.name} has been confirmed. Your digital ticket is now active.`,
+          type: "PAYMENT_VERIFIED",
+          link: "/my-bookings"
+        });
+
+        // 3. Notify Owner (New Paid Booking alert)
+        if (bk.venues?.owner_id) {
+          await createNotification({
+            userId: bk.venues.owner_id,
+            title: "New Booking Alert!",
+            message: `A new reservation at ${bk.venues?.name} was just paid and confirmed. Check your schedule.`,
+            type: "NEW_BOOKING",
+            link: "/owner/schedule"
+          });
+        }
+      }
+
+      toast.success('Booking approved & notifications dispatched');
+      fetchInitialData();
+    } catch (err) {
+      toast.error('Failed to approve booking');
+    }
+  };
+
+  const approveVenue = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('venues')
+        .update({ status: 'LIVE' })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      // Notify Owner
+      const { data: venue } = await supabase.from('venues').select('owner_id, name').eq('id', id).single();
+      if (venue?.owner_id) {
+        await createNotification({
+          userId: venue.owner_id,
+          title: "Venue is LIVE!",
+          message: `Congratulations! ${venue.name} has been vetted and is now appearing in global search results.`,
+          type: "VENUE_LIVE",
+          link: "/owner"
+        });
+      }
+
+      toast.success('Venue is now LIVE & Owner notified');
+      fetchInitialData();
+    } catch (err) {
+      toast.error('Failed to approve venue');
+    }
+  };
+
+  const searchUser = async () => {
+    if (!userSearch) return;
+    setSearchingUser(true);
+    try {
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('email', userSearch.toLowerCase().trim())
+        .single();
+      
+      if (profileError || !profile) {
+        toast.error('User not found');
+        setFoundUser(null);
+        return;
+      }
+
+      const { data: bks } = await supabase
+        .from('bookings')
+        .select('*, venues(name)')
+        .eq('user_id', profile.id)
+        .order('created_at', { ascending: false });
+
+      setFoundUser(profile);
+      setUserBookings(bks || []);
+    } catch (err) {
+      toast.error('Search failed');
     } finally {
-      setIsRegistering(false);
+      setSearchingUser(false);
     }
   };
-
-  const handleRoleChange = async (uid: string, newRole: string) => {
-    try {
-      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', uid);
-      if (error) throw error;
-      setUsers(prev => prev.map(u => u.id === uid ? { ...u, role: newRole } : u));
-      toast.success(`User role updated to ${newRole}`);
-    } catch (error) {
-      toast.error('Failed to update role.');
-    }
-  };
-
-  const handleToggleReviewVisibility = async (reviewId: string, currentHidden: boolean) => {
-    try {
-      const { error } = await supabase.from('reviews').update({ hidden: !currentHidden }).eq('id', reviewId);
-      if (error) throw error;
-      setReviews(prev => prev.map(r => r.id === reviewId ? { ...r, hidden: !currentHidden } : r));
-      toast.success(`Review ${!currentHidden ? 'hidden' : 'visible'}`);
-    } catch (error) {
-      toast.error('Failed to update review visibility.');
-    }
-  };
-
-  if (loading) return <div className="p-20 text-center animate-pulse text-white/50 font-display font-black italic uppercase text-4xl tracking-tighter">Initializing Master Control...</div>;
-
-  const tabs = [
-    { id: 'overview', label: 'Overview', icon: TrendingUp },
-    { id: 'bookings', label: 'Bookings', icon: FileText },
-    { id: 'verification', label: 'Approvals', icon: ShieldCheck, badge: bookings.filter(b => b.status === 'UNDER_REVIEW').length > 0 },
-    { id: 'users', label: 'Users', icon: Users },
-    { id: 'facilities', label: 'Facilities', icon: Building2 },
-    { id: 'reviews', label: 'Moderation', icon: MessageCircle },
-    { id: 'notifications', label: 'Notifications', icon: Bell },
-    { id: 'settings', label: 'System', icon: Settings }
-  ];
 
   return (
-    <div className="max-w-[1440px] mx-auto px-0 md:px-12 py-12 pb-32 space-y-12">
-      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-12 text-cyan">
-        <div className="space-y-1 flex-shrink-0">
-          <div className="flex items-center gap-2 text-cyan text-[10px] uppercase font-bold tracking-[0.2em]">
-            <Shield size={14} className="fill-cyan/20" /> System Secure
-          </div>
-          <h1 className="text-4xl sm:text-6xl font-display font-black uppercase italic tracking-tighter leading-none">Master <br /><span className="text-white/40">Command</span></h1>
-          <p className="text-slate-400 text-sm font-bold uppercase tracking-widest leading-relaxed mt-4">Super Admin Oversight</p>
-        </div>
-        
-        <div className="space-y-4 w-full lg:w-fit">
-          {/* Mobile Tab Selector */}
-          <div className="lg:hidden">
-            <Selector
-              options={tabs.map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
-              selectedId={activeTab}
-              onSelect={(id) => setActiveTab(id as any)}
-              label="Admin Operations"
-            />
+    <div className="min-h-screen bg-transparent text-white relative overflow-x-hidden">
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-30" />
+        <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
+      </div>
+      {/* Admin Header */}
+      <div className="glass border-b border-white/5 p-8 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 bg-lime rounded-2xl flex items-center justify-center text-charcoal shadow-xl shadow-lime/20">
+              <Shield size={28} />
+            </div>
+            <div>
+              <h1 className="text-3xl font-display font-black uppercase italic tracking-tighter">Master <span className="text-lime">Control</span></h1>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Platform Administrator Panel</p>
+            </div>
           </div>
 
-          {/* Desktop Nav */}
-          <nav className="hidden lg:flex flex-wrap gap-2 glass p-2 rounded-[32px] border-white/5">
-            {tabs.map((tab) => (
+          <div className="flex items-center gap-4">
+            <NotificationBell />
+            <div className="flex gap-2 p-1.5 glass border-white/5 rounded-[32px]">
+            {(['overview', 'verifications', 'venues', 'users', 'payouts'] as AdminTab[]).map((tab) => (
               <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all relative ${activeTab === tab.id ? 'bg-cyan text-charcoal shadow-lg shadow-cyan/20' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-8 py-4 rounded-3xl text-[10px] font-black uppercase tracking-widest transition-all relative ${
+                  activeTab === tab ? 'bg-lime text-charcoal' : 'text-slate-500 hover:text-white'
+                }`}
               >
-                <tab.icon size={14} />
-                {tab.label}
-                {tab.badge && (
-                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-charcoal" />
+                {tab}
+                {tab === 'payouts' && stats.pendingPayouts > 0 && (
+                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-[8px] border-2 border-charcoal">
+                    {stats.pendingPayouts}
+                  </span>
                 )}
               </button>
             ))}
-          </nav>
+            </div>
+          </div>
         </div>
-      </header>
+      </div>
 
-      <AnimatePresence mode="wait">
-        {activeTab === 'overview' && (
-          <motion.div
-            key="overview"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="space-y-12"
-          >
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[
-                { label: 'Total Users', value: users.length, icon: Users, color: 'cyan' },
-                { label: 'Active Facilities', value: facilities.length, icon: Building2, color: 'blue' },
-                { label: 'System Revenue', value: `₱${revenueLogs.reduce((acc, l) => acc + (l.amount || 0), 0).toLocaleString()}`, icon: DollarSign, color: 'green' },
-                { label: 'Market Flow', value: 'High', icon: TrendingUp, color: 'green' },
-              ].map((stat, i) => (
-                <div key={i} className="glass p-6 sm:p-8 rounded-[32px] sm:rounded-[48px] border-white/5 space-y-6">
-                  <stat.icon className="text-cyan/40" size={28} />
-                  <div>
-                    <p className="text-3xl sm:text-4xl font-display font-black italic text-white leading-none">{stat.value}</p>
-                    <p className="text-[10px] uppercase font-bold tracking-widest text-slate-500 mt-2">{stat.label}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
 
-            {/* Revenue Chart Section */}
-            <section className="glass p-8 sm:p-12 rounded-[48px] border-white/5 space-y-8 relative overflow-hidden">
-               <div className="absolute top-0 right-0 w-96 h-96 bg-cyan/5 rounded-full blur-[120px] -translate-y-1/2 translate-x-1/2" />
-               <div className="flex items-center justify-between relative">
-                  <div className="space-y-1">
-                    <h2 className="text-3xl font-display font-black uppercase italic tracking-tighter leading-none">Revenue <span className="text-white/40">Tracking</span></h2>
-                    <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest">Global Marketplace Volume</p>
-                  </div>
-                  <BarChart3 className="text-cyan animate-pulse" size={32} />
-               </div>
-
-               <div className="h-[400px] w-full pt-4">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart
-                      data={revenueLogs.map(l => ({
-                        date: new Date(l.created_at).toLocaleDateString(),
-                        amount: l.amount
-                      }))}
-                    >
-                      <defs>
-                        <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#22D3EE" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#22D3EE" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                      <XAxis 
-                        dataKey="date" 
-                        stroke="#475569" 
-                        fontSize={10} 
-                        tickLine={false} 
-                        axisLine={false}
-                        dy={10}
-                      />
-                      <YAxis 
-                        stroke="#475569" 
-                        fontSize={10} 
-                        tickLine={false} 
-                        axisLine={false}
-                        tickFormatter={(v) => `₱${v}`}
-                      />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: '#0F172A', 
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: '16px',
-                          fontSize: '10px',
-                          textTransform: 'uppercase',
-                          fontWeight: '900',
-                          letterSpacing: '1px'
-                        }}
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="amount" 
-                        stroke="#22D3EE" 
-                        strokeWidth={4}
-                        fillOpacity={1} 
-                        fill="url(#colorRevenue)" 
-                        animationDuration={2000}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-               </div>
-            </section>
-
-            <section className="glass p-6 sm:p-12 rounded-[32px] sm:rounded-[56px] border-white/10 shadow-2xl space-y-8 sm:space-y-10 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-96 h-96 bg-cyan/10 rounded-full blur-[120px] -translate-y-1/2 translate-x-1/2" />
-              <div className="flex items-center gap-4 sm:gap-6 relative">
-                <div className="p-4 sm:p-5 glass rounded-2xl sm:rounded-3xl border-white/5 text-cyan shrink-0"><Plus size={28} sm:size={32} /></div>
-                <div className="min-w-0">
-                  <h2 className="text-xl sm:text-2xl md:text-3xl font-display font-black uppercase italic tracking-tighter whitespace-normal break-words leading-none">Onboard <span className="text-white/40">Tenant</span></h2>
-                  <p className="text-slate-400 text-[10px] sm:text-xs md:text-sm font-medium italic mt-1 line-clamp-1">Instant registration for new facility operators.</p>
-                </div>
-              </div>
-
-              <form onSubmit={handleRegisterFacility} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end relative">
-                <div className="space-y-3">
-                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-[0.2em] ml-1">Facility Name</label>
-                  <input required className="w-full bg-white/5 border border-white/10 p-5 rounded-3xl focus:outline-none focus:border-cyan/40 transition-all text-sm font-bold uppercase tracking-widest" value={newFac.name} onChange={e => setNewFac({...newFac, name: e.target.value})} />
-                </div>
-                <div className="space-y-3">
-                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-[0.2em] ml-1">Sport Segment</label>
-                  <select className="w-full bg-white/5 border border-white/10 p-5 rounded-3xl focus:outline-none appearance-none text-sm font-bold uppercase tracking-widest text-white" value={newFac.type} onChange={e => setNewFac({...newFac, type: e.target.value})}>
-                    {['Basketball', 'Pickleball', 'Tennis', 'Badminton', 'Volleyball', 'Gym', 'Swimming Pool', 'Football', 'Futsal', 'Padel'].map(s => <option key={s} value={s} className="bg-charcoal text-white">{s}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-3">
-                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-[0.2em] ml-1">Operator UID</label>
-                  <input required className="w-full bg-white/5 border border-white/10 p-5 rounded-3xl focus:outline-none text-sm font-mono" value={newFac.ownerId} onChange={e => setNewFac({...newFac, ownerId: e.target.value})} />
-                </div>
-                <button 
-                  type="submit" 
-                  disabled={isRegistering}
-                  className="bg-cyan text-charcoal h-[66px] rounded-3xl font-display font-black uppercase italic tracking-tighter text-xl hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-cyan/20 flex items-center justify-center gap-3 disabled:opacity-50"
-                >
-                  {isRegistering && <Loader2 size={20} className="animate-spin" />}
-                  Register
-                </button>
-              </form>
-            </section>
-            
-            <button 
-              onClick={handleSeedData}
-              disabled={isSeeding}
-              className="flex items-center gap-3 glass border-lime/20 text-lime px-8 py-4 rounded-[32px] font-black uppercase tracking-widest text-[10px] transition-all hover:bg-lime/10 disabled:opacity-50"
+      <main className="max-w-7xl mx-auto p-8">
+        <AnimatePresence mode="wait">
+          {activeTab === 'overview' && (
+            <motion.div 
+              key="overview"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="space-y-8"
             >
-              {isSeeding ? <Loader2 size={16} className="animate-spin" /> : <Database size={16} />}
-              Initialize Infrastructure Seed
-            </button>
-          </motion.div>
-        )}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                 <div className="glass p-8 rounded-[40px] border-white/5 space-y-4">
+                    <div className="flex items-center justify-between">
+                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total Revenue</p>
+                       <DollarSign className="text-lime" size={18} />
+                    </div>
+                    <div className="text-4xl font-display font-black italic tracking-tighter text-white">
+                       ${stats.totalRevenue.toLocaleString()}
+                    </div>
+                    <div className="flex items-center gap-2 text-[9px] font-black text-lime uppercase tracking-widest bg-lime/10 w-fit px-3 py-1 rounded-full">
+                       <ArrowUpRight size={10} /> 100% Gross
+                    </div>
+                 </div>
 
-        {activeTab === 'bookings' && (
-          <motion.div
-            key="bookings"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="glass rounded-[48px] border-white/5 overflow-hidden"
-          >
-            <div className="p-10 border-b border-white/5 flex items-center justify-between glass">
-              <h2 className="text-2xl font-display font-black uppercase italic tracking-tight">Global <span className="text-white/40">Reservations</span></h2>
-              <div className="flex gap-4">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 bg-white/5 px-4 py-2 rounded-full border border-white/5">System Managed</span>
+                 <div className="glass p-8 rounded-[40px] border-white/5 space-y-4">
+                    <div className="flex items-center justify-between">
+                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Net Commission</p>
+                       <TrendingUp className="text-lime" size={18} />
+                    </div>
+                    <div className="text-4xl font-display font-black italic tracking-tighter text-lime">
+                       ${stats.commission.toLocaleString()}
+                    </div>
+                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">5% OF PLATFORM TOTAL</p>
+                 </div>
+
+                 <div className="glass p-8 rounded-[40px] border-white/5 space-y-4">
+                    <div className="flex items-center justify-between">
+                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Pending Pay</p>
+                       <AlertCircle className="text-amber-500" size={18} />
+                    </div>
+                    <div className="text-4xl font-display font-black italic tracking-tighter text-white">
+                       {stats.pendingBookings}
+                    </div>
+                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Manual Approvals</p>
+                 </div>
+
+                 <div className="glass p-8 rounded-[40px] border-white/5 space-y-4">
+                    <div className="flex items-center justify-between">
+                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">New Venues</p>
+                       <Building2 className="text-pink-500" size={18} />
+                    </div>
+                    <div className="text-4xl font-display font-black italic tracking-tighter text-white">
+                       {stats.pendingVenues}
+                    </div>
+                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Waiting for vetting</p>
+                 </div>
               </div>
-            </div>
-            <div className="overflow-x-auto no-scrollbar">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-white/5 bg-white/5">
-                    <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest">Entry</th>
-                    <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest">Status</th>
-                    <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest text-right">Admin Override</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {bookings.map((booking) => (
-                    <tr key={booking.id} className="hover:bg-white/5 transition-colors group">
-                      <td className="px-10 py-6">
-                        <div className="font-display font-black uppercase italic text-lg leading-none group-hover:text-cyan transition-colors">{booking.user_name}</div>
-                        <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">{booking.court_name} • {booking.booking_reference}</div>
-                      </td>
-                      <td className="px-10 py-6">
-                         <div className="flex items-center gap-3">
-                           <span className={`px-4 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-widest border flex items-center gap-2 ${
-                             booking.status === 'CONFIRMED' ? 'bg-cyan/20 text-cyan border-cyan/20' : 
-                             booking.status === 'CANCELLED' ? 'bg-red-500/20 text-red-500 border-red-500/20' : 
-                             booking.status === 'PENDING' || booking.status === 'PENDING_PROOF' ? 'bg-orange-500/20 text-orange-400 border-orange-500/20' :
-                             booking.status === 'UNDER_REVIEW' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' :
-                             'bg-white/5 text-slate-500 border-white/5'
-                           }`}>
-                             {booking.status === 'PENDING' || booking.status === 'PENDING_PROOF' ? <Clock size={12} className="animate-pulse" /> : 
-                              booking.status === 'UNDER_REVIEW' ? <ShieldAlert size={12} className="animate-pulse" /> : 
-                              booking.status === 'CONFIRMED' ? <CheckCircle size={12} /> : null}
-                             {booking.status}
-                           </span>
-                         </div>
-                      </td>
-                      <td className="px-10 py-6 text-right">
-                        <div className="flex justify-end gap-2">
-                           {['CONFIRMED', 'CANCELLED', 'RESERVED', 'PENDING_PROOF'].map(s => (
-                             <button
-                               key={s}
-                               onClick={() => handleBookingManualStatus(booking.id, s)}
-                               className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${booking.status === s ? 'bg-cyan text-charcoal' : 'bg-white/5 text-slate-500 hover:text-white hover:bg-white/10'}`}
-                             >
-                               {s === 'PENDING_PROOF' ? 'PROOF' : s}
-                             </button>
-                           ))}
+            </motion.div>
+          )}
+
+          {activeTab === 'verifications' && (
+            <motion.div key="verif" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+               <div className="glass rounded-[48px] border-white/5 overflow-hidden">
+                  <div className="p-8 border-b border-white/5">
+                    <h2 className="text-xl font-display font-black uppercase italic tracking-tight">Payment <span className="text-white/40">Queue</span></h2>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                       <thead>
+                          <tr className="border-b border-white/5">
+                            <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Reference</th>
+                            <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Player</th>
+                            <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Venue</th>
+                            <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Amount</th>
+                            <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Actions</th>
+                          </tr>
+                       </thead>
+                       <tbody className="divide-y divide-white/5">
+                         {pendingBookings.map((bk) => (
+                           <tr key={bk.id} className="group hover:bg-white/[0.02] transition-colors">
+                             <td className="p-8 font-mono text-xs text-lime">{bk.booking_reference}</td>
+                             <td className="p-8">
+                                <div className="text-xs font-black uppercase">{bk.profiles?.name}</div>
+                                <div className="text-[9px] text-slate-500">{bk.profiles?.email}</div>
+                             </td>
+                             <td className="p-8 text-xs font-black uppercase text-white/60">{bk.facilities?.name}</td>
+                             <td className="p-8 text-xs font-black">${bk.total_price}</td>
+                             <td className="p-8">
+                                <div className="flex gap-2">
+                                   <button 
+                                      onClick={() => setViewingProof(bk.payment_proof_url)}
+                                      className="p-3 glass border-white/10 rounded-xl hover:bg-white/5 text-slate-400 hover:text-white"
+                                   >
+                                      <Eye size={16} />
+                                   </button>
+                                   <button 
+                                      onClick={() => approveBooking(bk.id)}
+                                      className="px-6 py-3 bg-lime/10 border border-lime/20 text-lime rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-lime hover:text-charcoal transition-all"
+                                   >
+                                      Approve
+                                   </button>
+                                </div>
+                             </td>
+                           </tr>
+                         ))}
+                       </tbody>
+                    </table>
+                  </div>
+               </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'venues' && (
+             <motion.div key="ven" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {pendingVenues.map((venue) => (
+                  <div key={venue.id} className="glass rounded-[48px] border-white/5 p-8 flex flex-col justify-between group hover:border-pink-500/40 transition-all">
+                     <div className="space-y-6">
+                        <div className="w-20 h-20 glass rounded-[28px] overflow-hidden">
+                           <img src={venue.images?.[0] || 'https://images.unsplash.com/photo-1541252260730-0412e8e2108e'} className="w-full h-full object-cover" />
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </motion.div>
-        )}
+                        <div>
+                           <h3 className="text-2xl font-display font-black uppercase italic tracking-tight text-white">{venue.name}</h3>
+                           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{venue.city}, {venue.country_code}</p>
+                        </div>
+                        <div className="flex gap-2">
+                           <span className="px-3 py-1 glass border-white/5 rounded-full text-[8px] font-black uppercase tracking-widest text-slate-500">Contact: {venue.contact_email}</span>
+                        </div>
+                     </div>
+                     <div className="pt-8 mt-8 border-t border-white/5 flex gap-4">
+                        <button className="flex-1 px-8 py-4 glass border-white/5 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500">Reject</button>
+                        <button 
+                           onClick={() => approveVenue(venue.id)}
+                           className="flex-1 px-8 py-4 bg-pink-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-pink-600/20"
+                        >Activate</button>
+                     </div>
+                  </div>
+                ))}
+             </motion.div>
+          )}
 
-        {activeTab === 'settings' && (
-          <motion.div
-            key="settings"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 1.05 }}
-            className="max-w-3xl mx-auto space-y-8"
-          >
-            <div className="glass p-12 rounded-[64px] border-white/10 space-y-12">
-               <div className="space-y-2">
-                 <h2 className="text-4xl font-display font-black uppercase italic tracking-tighter">Command <span className="text-white/40">Protocol</span></h2>
-                 <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">Global platform primitives</p>
+          {activeTab === 'users' && (
+            <motion.div key="usr" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+               <div className="max-w-2xl mx-auto space-y-6">
+                  <div className="relative group">
+                     <Mail className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-lime transition-colors" size={20} />
+                     <input 
+                        type="email" 
+                        placeholder="ENTER USER EMAIL..."
+                        value={userSearch}
+                        onChange={e => setUserSearch(e.target.value)}
+                        className="w-full h-20 glass border-white/10 p-8 pl-16 rounded-[32px] text-xs font-black uppercase tracking-widest focus:border-lime/60 outline-none text-white"
+                     />
+                     <button 
+                        onClick={searchUser}
+                        disabled={searchingUser || !userSearch}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 h-12 px-8 bg-lime text-charcoal rounded-2xl font-black uppercase tracking-widest text-[10px] hover:scale-105 transition-all"
+                     >
+                        Search
+                     </button>
+                  </div>
+
+                  {foundUser && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+                       <div className="glass p-8 rounded-[40px] border-white/5 flex items-center gap-6">
+                          <div className="w-16 h-16 bg-lime/10 rounded-full flex items-center justify-center text-lime text-2xl font-display font-black italic">{foundUser.name?.charAt(0) || 'U'}</div>
+                          <div>
+                             <h3 className="text-xl font-display font-black uppercase italic tracking-tight text-white">{foundUser.name}</h3>
+                             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{foundUser.email}</p>
+                          </div>
+                          <div className="ml-auto px-5 py-2 glass border-white/5 rounded-full text-[9px] font-black uppercase tracking-widest text-lime">{foundUser.role}</div>
+                       </div>
+
+                       <div className="glass rounded-[48px] border-white/5 overflow-hidden">
+                          <div className="p-8 border-b border-white/5 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                               <History size={18} className="text-slate-500" />
+                               <h3 className="text-xs font-black uppercase tracking-widest">Booking History</h3>
+                            </div>
+                            <span className="text-[10px] font-black uppercase text-slate-500">{userBookings.length} Matches</span>
+                          </div>
+                          <div className="divide-y divide-white/5">
+                             {userBookings.map((bk) => (
+                                <div key={bk.id} className="p-8 flex justify-between items-center text-xs">
+                                   <div>
+                                      <div className="font-black uppercase tracking-widest mb-1 text-white">{bk.venues?.name}</div>
+                                      <div className="text-[10px] text-slate-500 uppercase">{format(new Date(bk.start_time), 'MMM dd, HH:mm')}</div>
+                                   </div>
+                                   <div className={`px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest ${
+                                      bk.payment_status === 'paid' ? 'bg-lime/10 text-lime' : 'bg-amber-500/10 text-amber-500'
+                                   }`}>
+                                      {bk.payment_status}
+                                   </div>
+                                </div>
+                             ))}
+                          </div>
+                       </div>
+                    </motion.div>
+                  )}
                </div>
+            </motion.div>
+          )}
 
-               <div className="space-y-6">
-                 <div className="flex items-center justify-between p-8 glass rounded-[32px] border-white/5 group hover:border-cyan/20 transition-all">
-                    <div className="space-y-1">
-                      <p className="text-xl font-display font-black uppercase italic text-white group-hover:text-cyan transition-colors">Global SMS Distribution</p>
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Enable/Disable all platform notifications</p>
+          {activeTab === 'payouts' && (
+            <motion.div key="payouts" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+               <div className="glass rounded-[48px] border-white/5 overflow-hidden">
+                  <div className="p-8 border-b border-white/5 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-xl font-display font-black uppercase italic tracking-tight text-white">Settlement <span className="text-white/40">Queue</span></h2>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-lime mt-1">Pending Venue Withdrawals</p>
                     </div>
-                    <button 
-                      onClick={handleToggleGlobalSms}
-                      className={`w-20 h-10 rounded-full p-1 transition-all flex items-center ${systemSettings.global_sms_enabled ? 'bg-cyan' : 'bg-white/10'}`}
-                    >
-                       <div className={`w-8 h-8 rounded-full shadow-lg transition-transform ${systemSettings.global_sms_enabled ? 'translate-x-10 bg-charcoal' : 'translate-x-0 bg-slate-500'}`} />
-                    </button>
-                 </div>
-
-                 <div className="flex items-center justify-between p-8 glass rounded-[32px] border-white/5 opacity-40 cursor-not-allowed">
-                    <div className="space-y-1">
-                      <p className="text-xl font-display font-black uppercase italic text-white">Payment Gateway</p>
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Platform-wide transaction processing</p>
-                    </div>
-                    <div className="w-20 h-10 rounded-full p-1 bg-white/10 flex items-center">
-                       <div className="w-8 h-8 rounded-full bg-slate-500" />
-                    </div>
-                 </div>
-               </div>
-
-               <div className="pt-8 border-t border-white/5 flex items-center gap-4 text-cyan/40">
-                  <ShieldCheck size={20} />
-                  <p className="text-[10px] font-black uppercase tracking-widest">Security layer active • Master overrides enabled</p>
-               </div>
-            </div>
-          </motion.div>
-        )}
-        {activeTab === 'users' && (
-          <motion.div
-            key="users"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="glass rounded-[48px] border-white/5 overflow-hidden"
-          >
-            <div className="p-10 border-b border-white/5 flex items-center justify-between sticky top-0 z-10 glass">
-              <h2 className="text-2xl font-display font-black uppercase italic tracking-tight">Identity <span className="text-white/40">Registry</span></h2>
-              <div className="relative">
-                <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                <input placeholder="Filter by email..."  className="pl-12 pr-6 py-3 bg-white/5 rounded-2xl text-[10px] font-bold uppercase tracking-widest border border-white/10 focus:border-cyan/40 outline-none w-64" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-              </div>
-            </div>
-            <div className="overflow-x-auto no-scrollbar">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-white/5 bg-white/5">
-                    <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest">User Profile</th>
-                    <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest">Clearance</th>
-                    <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest text-right">Access Level</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {users.filter(u => u.email.includes(searchTerm)).map((user) => (
-                    <tr key={user.id} className="hover:bg-white/5 transition-colors group">
-                      <td className="px-10 py-6">
-                        <div className="font-display font-black uppercase italic text-lg leading-none group-hover:text-cyan transition-colors">{user.name}</div>
-                        <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">{user.email}</div>
-                      </td>
-                      <td className="px-10 py-6">
-                        <span className={`px-4 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-widest border ${
-                          user.role === 'super_admin' ? 'bg-cyan/20 text-cyan border-cyan/20' : 
-                          user.role === 'ADMIN' ? 'bg-red-500/20 text-red-400 border-red-500/20' : 
-                          user.role === 'OWNER' ? 'bg-blue-500/20 text-blue-400 border-blue-500/20' : 'bg-white/5 text-slate-500 border-white/5'
-                        }`}>
-                          {user.role}
-                        </span>
-                      </td>
-                      <td className="px-10 py-6 text-right">
-                        <select className="bg-white/5 p-3 rounded-xl text-[10px] uppercase font-bold text-white focus:text-white outline-none cursor-pointer tracking-widest" value={user.role} onChange={(e) => handleRoleChange(user.id, e.target.value)}>
-                          <option value="PLAYER" className="bg-charcoal text-white">Standard</option>
-                          <option value="OWNER" className="bg-charcoal text-white">Operator</option>
-                          <option value="ADMIN" className="bg-charcoal text-white">Admin</option>
-                          <option value="super_admin" className="bg-charcoal text-white">Super Admin</option>
-                        </select>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </motion.div>
-        )}
-
-        {activeTab === 'facilities' && (
-          <motion.div
-            key="facilities"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
-          >
-            {facilities.map(fac => (
-              <div key={fac.id} className="glass p-8 rounded-[48px] border-white/5 group hover:border-white/10 transition-all space-y-6 relative overflow-hidden">
-                 {!fac.isActive && (
-                   <div className="absolute top-0 left-0 w-full h-1 bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]" />
-                 )}
-                 <div className="flex items-center justify-between">
-                   <div className="w-16 h-16 glass border-white/10 rounded-2xl flex items-center justify-center font-display font-black text-cyan italic text-2xl uppercase">{fac.name[0]}</div>
-                   <div className={`px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${fac.isActive ? 'bg-cyan/10 text-cyan border-cyan/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
-                     {fac.isActive ? fac.type : 'Locked'}
-                   </div>
-                 </div>
-                 <div className="space-y-1">
-                   <h3 className="text-2xl font-display font-black uppercase italic tracking-tight text-white group-hover:text-cyan transition-colors line-clamp-1">{fac.name}</h3>
-                   <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest line-clamp-1">{fac.address || 'No location provided'}</p>
-                 </div>
-                 <div className="pt-4 flex items-center justify-between border-t border-white/5">
-                    <button 
-                      onClick={() => handleToggleFacilityStatus(fac.id, !!fac.isActive)}
-                      className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all ${fac.isActive ? 'text-red-400 hover:text-red-300' : 'text-cyan hover:text-white'}`}
-                    >
-                       {fac.isActive ? <EyeOff size={14} /> : <Eye size={14} />}
-                       {fac.isActive ? 'Lockdown' : 'Activate'}
-                    </button>
-                    <button 
-                      onClick={() => navigate(`/facility/${fac.id}`)}
-                      className="text-white hover:text-cyan transition-colors active:scale-90 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
-                    >
-                      <Settings size={14} />
-                      Config
-                    </button>
-                 </div>
-              </div>
-            ))}
-          </motion.div>
-        )}
-
-        {activeTab === 'reviews' && (
-          <motion.div
-            key="reviews"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="space-y-8"
-          >
-            <div className="flex items-center justify-between glass p-8 px-12 rounded-[40px] border-white/5">
-              <h2 className="text-3xl font-display font-black uppercase italic tracking-tight">Content <span className="text-white/40">Moderation</span></h2>
-              <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 bg-white/5 px-4 py-2 rounded-full border border-white/5">Global Log: {reviews.length} Entries</div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-6">
-              {reviews.map((review) => (
-                <div key={review.id} className={`glass p-10 rounded-[56px] border-white/5 transition-all flex flex-col md:flex-row gap-10 items-start ${review.hidden ? 'opacity-40 grayscale' : ''}`}>
-                  <div className="md:w-64 space-y-4">
-                    <div className="text-white font-display font-black uppercase italic text-2xl group-hover:text-lime transition-colors leading-tight">{review.user_name}</div>
-                    <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest px-3 py-1 bg-white/5 rounded-full border border-white/5 w-fit">PID: {review.id.slice(0, 8)}</div>
-                    <div className="flex gap-1">
-                      {[...Array(5)].map((_, i) => (
-                        <Star key={i} size={14} className={i < review.rating ? 'text-lime fill-lime shadow-xl' : 'text-white/10'} />
-                      ))}
+                    <div className="px-6 py-2 glass border-white/10 rounded-full text-xs font-black uppercase tracking-widest text-slate-400">
+                       {pendingWithdrawals.length} REQUESTS
                     </div>
                   </div>
 
-                  <div className="flex-1 space-y-6 border-l border-white/5 pl-10">
-                    <div className="space-y-2">
-                       <span className="text-[9px] font-black uppercase tracking-widest text-lime/50">{review.facility_name}</span>
-                       <p className="text-lg font-medium text-slate-300 leading-relaxed italic">"{review.comment}"</p>
-                    </div>
-                    {review.owner_reply && (
-                      <div className="bg-white/5 p-6 rounded-3xl border border-white/10 space-y-2">
-                         <span className="text-[9px] font-black uppercase tracking-widest text-white/20">System Response</span>
-                         <p className="text-sm text-slate-400 italic">"{review.owner_reply.text}"</p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                       <thead>
+                          <tr className="border-b border-white/5">
+                             <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Business / Owner</th>
+                             <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Amount</th>
+                             <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Method</th>
+                             <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Payment Details</th>
+                             <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Actions</th>
+                          </tr>
+                       </thead>
+                       <tbody className="divide-y divide-white/5">
+                         {pendingWithdrawals.map((withdrawal) => (
+                           <tr key={withdrawal.id} className="group hover:bg-white/[0.02] transition-colors">
+                              <td className="p-8">
+                                 <div className="text-xs font-black uppercase text-white">{withdrawal.profiles?.business_name || withdrawal.profiles?.name}</div>
+                                 <div className="text-[9px] text-slate-500 uppercase tracking-widest">{withdrawal.profiles?.email}</div>
+                              </td>
+                              <td className="p-8">
+                                 <div className="text-xl font-display font-black italic text-lime">₱{withdrawal.amount.toLocaleString()}</div>
+                                 <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{format(new Date(withdrawal.created_at), 'MMM dd, HH:mm')}</div>
+                              </td>
+                              <td className="p-8">
+                                 <div className={`px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest w-fit ${
+                                   withdrawal.method === 'bank' ? 'bg-blue-500/10 text-blue-500' : 'bg-lime/10 text-lime'
+                                 }`}>
+                                    {withdrawal.method.replace('-', ' ')}
+                                 </div>
+                              </td>
+                              <td className="p-8">
+                                 <div className="text-[10px] font-bold text-white uppercase tracking-tight">{withdrawal.details.account_name}</div>
+                                 <div className="font-mono text-[10px] text-slate-500 mt-1">
+                                    {withdrawal.method === 'bank' ? (
+                                      `${withdrawal.details.bank_name} • ${withdrawal.details.account_number}`
+                                    ) : (
+                                      `${withdrawal.details.provider} • ${withdrawal.details.account_number}`
+                                    )}
+                                 </div>
+                              </td>
+                              <td className="p-8">
+                                 <button 
+                                   onClick={() => completePayout(withdrawal)}
+                                   className="px-6 py-3 bg-lime text-charcoal rounded-xl text-[9px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-lg shadow-lime/10"
+                                 >
+                                    Mark as Paid
+                                 </button>
+                              </td>
+                           </tr>
+                         ))}
+                       </tbody>
+                    </table>
+
+                    {pendingWithdrawals.length === 0 && (
+                      <div className="p-20 text-center space-y-4">
+                         <div className="w-20 h-20 glass rounded-full mx-auto flex items-center justify-center text-slate-800">
+                            <CheckCircle2 size={40} />
+                         </div>
+                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 italic">Clear Skies • No Pending Pay</p>
                       </div>
                     )}
                   </div>
-
-                  <div className="flex md:flex-col gap-3">
-                    <button 
-                      onClick={() => handleToggleReviewVisibility(review.id, review.hidden)}
-                      className={`p-5 rounded-[32px] transition-all ${review.hidden ? 'bg-lime text-charcoal shadow-xl shadow-lime/20' : 'bg-charcoal/50 text-white/40 border border-white/10 hover:border-lime/40'}`}
-                      title={review.hidden ? "Show Review" : "Hide Review"}
-                    >
-                      {review.hidden ? <Eye size={24} /> : <EyeOff size={24} />}
-                    </button>
-                    <button 
-                      className="p-5 rounded-[32px] bg-charcoal/50 text-white/40 border border-white/10 hover:border-red-500/40 hover:text-red-400 transition-all font-display font-black uppercase italic text-xs"
-                      onClick={() => toast.error('Permanent deletion requires Master Override')}
-                    >
-                      <XCircle size={24} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {reviews.length === 0 && (
-                <div className="glass p-20 rounded-[64px] border-white/5 text-center space-y-4">
-                  <MessageCircle size={48} className="text-white/5 mx-auto" />
-                  <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Registry is empty. No reviews to moderate.</p>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-        {activeTab === 'verification' && (
-          <motion.div
-            key="verification"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="space-y-12"
-          >
-            {/* Booking Approvals Section */}
-            <div className="glass rounded-[48px] border-white/5 overflow-hidden">
-               <div className="p-10 border-b border-white/5 glass flex items-center justify-between">
-                  <div className="space-y-1">
-                    <h2 className="text-2xl font-display font-black uppercase italic tracking-tight">Payment <span className="text-white/40">Verification</span></h2>
-                    <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">Validate proof of payment (UNDER_REVIEW Bookings)</p>
-                  </div>
-                  <div className="w-12 h-12 bg-cyan/10 rounded-2xl flex items-center justify-center text-cyan">
-                    <ShieldCheck size={24} />
-                  </div>
                </div>
-               <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-white/5 bg-white/5">
-                        <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest">Participant</th>
-                        <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest">Venue & Price</th>
-                        <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest">Evidence</th>
-                        <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest text-right">Approval Cycle</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/5">
-                      {bookings.filter(b => b.status === 'UNDER_REVIEW').length > 0 ? (
-                        bookings.filter(b => b.status === 'UNDER_REVIEW').map((b) => (
-                          <tr key={b.id} className="hover:bg-white/5 transition-colors group">
-                            <td className="px-10 py-6">
-                              <div className="font-display font-black uppercase italic text-lg leading-none">{b.user_name}</div>
-                              <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">{b.booking_reference}</div>
-                            </td>
-                            <td className="px-10 py-6">
-                               <div className="text-xs font-bold text-white uppercase tracking-tight">{b.facility_name}</div>
-                               <div className="text-lg font-display font-black italic text-cyan/60 leading-tight mt-1">₱{b.amount?.toLocaleString()}</div>
-                            </td>
-                            <td className="px-10 py-6">
-                              {b.payment_receipt_url ? (
-                                <a href={b.payment_receipt_url} target="_blank" rel="noopener noreferrer" className="inline-block p-1 bg-white/5 rounded-xl border border-white/10 hover:border-cyan/40 transition-all">
-                                   <img src={b.payment_receipt_url} className="w-20 h-20 object-cover rounded-lg" alt="Proof" />
-                                </a>
-                              ) : (
-                                <span className="text-slate-600 font-bold text-[10px] uppercase tracking-widest">Void</span>
-                              )}
-                            </td>
-                            <td className="px-10 py-6 text-right space-x-4">
-                              <button 
-                                onClick={async () => {
-                                  try {
-                                    const { error } = await supabase.from('bookings').update({ status: 'CONFIRMED' }).eq('id', b.id);
-                                    if (error) throw error;
-                                    
-                                    // Log to revenue logs
-                                    await supabase.from('revenue_logs').insert({
-                                      booking_id: b.id,
-                                      amount: b.amount,
-                                      facility_id: b.facility_id
-                                    });
+            </motion.div>
+          )}
 
-                                    toast.success('BOOKING CONFIRMED: Revenue recorded.', { icon: '💰' });
-                                    fetchData();
-                                  } catch (e) {
-                                    toast.error('Confirmation sequence failed.');
-                                  }
-                                }}
-                                className="px-6 py-3 bg-cyan text-charcoal rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-xl shadow-cyan/20"
-                              >
-                                Approve
-                              </button>
-                              <button 
-                                onClick={async () => {
-                                  try {
-                                    const { error } = await supabase.from('bookings').update({ status: 'CANCELLED' }).eq('id', b.id);
-                                    if (error) throw error;
-                                    toast.error('BOOKING REJECTED');
-                                    fetchData();
-                                  } catch (e) {
-                                    toast.error('Rejection failed.');
-                                  }
-                                }}
-                                className="px-6 py-3 bg-white/5 text-red-400 border border-red-500/10 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-500/10 transition-all"
-                              >
-                                Reject
-                              </button>
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={4} className="px-10 py-20 text-center text-slate-600 font-bold uppercase tracking-widest text-xs italic">
-                            Transactional stream is clear. No payments for review.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-               </div>
-            </div>
+        </AnimatePresence>
+      </main>
 
-            {/* Operator Verification Section */}
-            <div className="glass rounded-[48px] border-white/5 overflow-hidden">
-               <div className="p-10 border-b border-white/5 glass">
-                  <h2 className="text-2xl font-display font-black uppercase italic tracking-tight text-white/60">Operator <span className="text-white/20">Verifications</span></h2>
+      {/* Proof Modal */}
+      <AnimatePresence>
+        {viewingProof && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-8">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setViewingProof(null)} className="absolute inset-0 bg-charcoal/90 backdrop-blur-3xl" />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative max-w-xl w-full glass rounded-[48px] border-white/10 overflow-hidden shadow-2xl">
+               <div className="p-8 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
+                  <h3 className="text-xs font-black uppercase tracking-widest">Payment Verification</h3>
+                  <button onClick={() => setViewingProof(null)} className="p-2 glass border-white/10 rounded-xl text-slate-500 hover:text-white"><X size={20}/></button>
                </div>
-               <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-white/5 bg-white/5">
-                        <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest">Operator</th>
-                        <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest">Document</th>
-                        <th className="px-10 py-6 text-[10px] uppercase font-bold text-slate-500 tracking-widest text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/5">
-                      {pendingVerificationUsers.length > 0 ? pendingVerificationUsers.map((u) => (
-                        <tr key={u.id} className="hover:bg-white/5 transition-colors group">
-                          <td className="px-10 py-6">
-                            <div className="font-display font-black uppercase italic text-lg leading-none">{u.name}</div>
-                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">{u.email}</div>
-                            {u.business_name && (
-                              <div className="text-[10px] text-lime font-bold uppercase tracking-widest mt-2">{u.business_name}</div>
-                            )}
-                            {u.business_address && (
-                              <div className="text-[10px] text-slate-600 font-bold uppercase tracking-widest mt-1">{u.business_address}</div>
-                            )}
-                          </td>
-                          <td className="px-10 py-6">
-                            {u.kyc_url ? (
-                              <a href={u.kyc_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-lime hover:underline font-bold text-[10px] uppercase tracking-widest translate-y-[-8px]">
-                                <FileText size={14} />
-                                View Evidence
-                              </a>
-                            ) : (
-                              <span className="text-slate-600 font-bold text-[10px] uppercase tracking-widest">No Document</span>
-                            )}
-                          </td>
-                          <td className="px-10 py-6 text-right space-x-4">
-                            <button 
-                              onClick={() => handleVerifyUser(u.id, 'verified')}
-                              className="px-6 py-2 bg-lime/20 text-lime border border-lime/20 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-lime hover:text-charcoal transition-all"
-                            >
-                              Approve
-                            </button>
-                            <button 
-                              onClick={() => handleVerifyUser(u.id, 'rejected')}
-                              className="px-6 py-2 bg-red-500/10 text-red-500 border border-red-500/10 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all"
-                            >
-                              Reject
-                            </button>
-                          </td>
-                        </tr>
-                      )) : (
-                        <tr>
-                          <td colSpan={3} className="px-10 py-20 text-center text-slate-600 font-bold uppercase tracking-widest text-xs italic">
-                            All operators are currently verified
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+               <div className="aspect-[4/5] bg-white">
+                  <img src={viewingProof} className="w-full h-full object-contain" alt="Payment Proof" />
                </div>
-            </div>
-          </motion.div>
-        )}
-        {activeTab === 'notifications' && (
-          <motion.div
-            key="notifications"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="space-y-8"
-          >
-            <div className="flex items-center justify-between glass p-8 px-12 rounded-[40px] border-white/5">
-              <h2 className="text-3xl font-display font-black uppercase italic tracking-tight">System <span className="text-white/40">Communications</span></h2>
-              <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 bg-white/5 px-4 py-2 rounded-full border border-white/5">Full System Log: {notifications.length} Entries</div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4">
-              {notifications.map((n) => (
-                <div key={n.id} className="glass p-6 rounded-3xl border border-white/5 flex items-center justify-between gap-6 group hover:border-cyan/20 transition-all">
-                  <div className="flex items-center gap-6">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${n.read ? 'bg-white/5 text-slate-500' : 'bg-cyan/10 text-cyan'}`}>
-                      <Bell size={20} />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-3">
-                        <h4 className="text-[11px] font-black uppercase tracking-wider text-white">{n.title}</h4>
-                        <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest px-2 py-0.5 border border-white/5 rounded-full">UID: {n.user_id?.slice(0, 8)}</span>
-                      </div>
-                      <p className="text-xs text-slate-400 font-medium">{n.message}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-600">
-                      {n.created_at ? new Date(n.created_at).toLocaleString() : 'Recent'}
-                    </p>
-                    <span className={`text-[8px] font-black uppercase tracking-widest p-1 px-2 rounded-md mt-2 inline-block ${n.read ? 'bg-white/5 text-slate-600' : 'bg-cyan/20 text-cyan'}`}>
-                      {n.read ? 'ACKNOWLEDGED' : 'ACTIVE'}
-                    </span>
-                  </div>
-                </div>
-              ))}
-              {notifications.length === 0 && (
-                <div className="glass p-20 rounded-[64px] border-white/5 text-center space-y-4">
-                  <Bell size={48} className="text-white/5 mx-auto" />
-                  <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">No notification events recorded in this cycle.</p>
-                </div>
-              )}
-            </div>
-          </motion.div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

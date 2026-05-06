@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth, UserRole } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { User, Shield, ToggleLeft as Toggle, Mail, Calendar, LogOut, Activity, Zap, Trophy, CreditCard, MessageSquare, Phone, Bell, CheckCircle2, ShieldCheck, Building2, MapPin, Upload, AlertCircle } from 'lucide-react';
+import { User, Shield, ToggleLeft as Toggle, Mail, Calendar, LogOut, Activity, Zap, Trophy, CreditCard, MessageSquare, Phone, Bell, CheckCircle2, ShieldCheck, Building2, MapPin, Upload, AlertCircle, Star, Trash2, Edit3, Heart } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 
@@ -13,8 +13,11 @@ export default function Profile() {
     name: '',
     phone: '',
     business_name: '',
-    business_address: ''
+    business_address: '',
+    default_sport: ''
   });
+  const [userReviews, setUserReviews] = React.useState<any[]>([]);
+  const [loadingReviews, setLoadingReviews] = React.useState(true);
 
   React.useEffect(() => {
     if (profile) {
@@ -22,15 +25,45 @@ export default function Profile() {
         name: profile.name || '',
         phone: (profile as any).phone || '',
         business_name: profile.business_name || '',
-        business_address: profile.business_address || ''
+        business_address: profile.business_address || '',
+        default_sport: (profile as any).default_sport || ''
       });
+      fetchUserReviews();
     }
   }, [profile]);
 
+  const fetchUserReviews = async () => {
+    if (!user) return;
+    try {
+      const { data } = await supabase
+        .from('reviews')
+        .select('*, facilities(name)')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      setUserReviews(data || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingReviews(false);
+    }
+  };
+
+  const deleteReview = async (id: string) => {
+    if (!confirm('Delete this review permanently?')) return;
+    try {
+      const { error } = await supabase.from('reviews').delete().eq('id', id);
+      if (error) throw error;
+      toast.success('Review deleted');
+      setUserReviews(prev => prev.filter(r => r.id !== id));
+    } catch (e) {
+      toast.error('Failed to delete review');
+    }
+  };
+
   const [systemSettings, setSystemSettings] = React.useState({ globalSmsEnabled: true });
   const [alerts, setAlerts] = React.useState({
-    email: (profile as any)?.notifications?.email !== false,
-    sms: (profile as any)?.notifications?.sms === true
+    email: profile?.email_notifications !== false,
+    sms: profile?.sms_notifications === true
   });
 
   React.useEffect(() => {
@@ -52,10 +85,10 @@ export default function Profile() {
   }, []);
 
   React.useEffect(() => {
-    if ((profile as any)?.notifications) {
+    if (profile) {
       setAlerts({
-        email: (profile as any).notifications.email !== false,
-        sms: (profile as any).notifications.sms === true
+        email: profile.email_notifications !== false,
+        sms: profile.sms_notifications === true
       });
     }
   }, [profile]);
@@ -66,10 +99,7 @@ export default function Profile() {
     setAlerts(prev => ({ ...prev, [type]: nextValue }));
     
     await handleUpdateProfile({ 
-      notifications: { 
-        ...(profile as any)?.notifications, 
-        [type]: nextValue 
-      } 
+      [`${type}_notifications`]: nextValue
     });
   };
 
@@ -126,7 +156,12 @@ export default function Profile() {
   const isSuperAdmin = user.email === 'miguel@builtbymiguel.net' || profile.role === 'ADMIN';
 
   return (
-    <div className="max-w-6xl mx-auto px-6 sm:px-12 py-12 pb-32 space-y-12">
+    <div className="min-h-screen bg-transparent relative overflow-x-hidden">
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-50" />
+        <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
+      </div>
+      <div className="max-w-6xl mx-auto px-6 sm:px-12 py-12 pb-32 space-y-12 relative z-10">
       <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
         <div className="space-y-1">
           <h1 className="text-5xl font-display font-black uppercase italic tracking-tighter">Profile <span className="text-white/40">Studio</span></h1>
@@ -206,6 +241,38 @@ export default function Profile() {
                </div>
             </div>
           </div>
+
+          {/* New Role Switcher Card */}
+          <div className="glass p-8 rounded-[40px] space-y-6 border-white/5">
+            <div className="space-y-1">
+              <h3 className="text-xl font-display font-black uppercase italic tracking-tight">Active <span className="text-white/40">Identity</span></h3>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Select your core experience</p>
+            </div>
+            <div className="flex flex-col gap-3">
+              {[
+                { id: 'PLAYER', label: 'Player', desc: 'Book courts & track games', icon: <Activity size={16} /> },
+                { id: 'OWNER', label: 'Court Owner', desc: 'List venue & manage bookings', icon: <Building2 size={16} /> }
+              ].map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => handleRoleSwitch(r.id as UserRole)}
+                  className={`flex items-center gap-4 p-4 rounded-2xl border transition-all text-left ${
+                    profile.role === r.id 
+                    ? 'bg-lime border-lime text-charcoal shadow-lg shadow-lime/20' 
+                    : 'glass border-white/5 text-slate-400 hover:border-white/20'
+                  }`}
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${profile.role === r.id ? 'bg-charcoal text-lime' : 'bg-white/10'}`}>
+                    {r.icon}
+                  </div>
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-tight">{r.label}</p>
+                    <p className="text-[9px] font-bold opacity-60 uppercase tracking-widest">{r.desc}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Right Col: Admin & Settings */}
@@ -278,7 +345,7 @@ export default function Profile() {
                            <input 
                             type="text" 
                             className="w-full h-16 bg-white/5 border border-white/20 rounded-2xl px-6 focus:outline-none focus:border-lime/40 transition-all font-bold placeholder:text-white/20"
-                            placeholder="e.g. Center Court Sports Inc."
+                            placeholder="E.G. CENTER COURT SPORTS INC."
                             value={formData.business_name}
                             onChange={(e) => setFormData(prev => ({ ...prev, business_name: e.target.value }))}
                            />
@@ -298,7 +365,7 @@ export default function Profile() {
                            <input 
                             type="text" 
                             className="w-full h-16 bg-white/5 border border-white/20 rounded-2xl px-6 focus:outline-none focus:border-lime/40 transition-all font-bold placeholder:text-white/20"
-                            placeholder="Registered Physical Address"
+                            placeholder="REGISTERED PHYSICAL ADDRESS"
                             value={formData.business_address}
                             onChange={(e) => setFormData(prev => ({ ...prev, business_address: e.target.value }))}
                            />
@@ -388,7 +455,7 @@ export default function Profile() {
                                <input 
                                  type="tel" 
                                  placeholder="+63 9XX XXX XXXX"
-                                 className="w-full glass border-white/10 p-5 pl-12 rounded-3xl text-sm font-bold focus:border-lime/40 transition-all text-white"
+                                 className="w-full glass border-white/10 p-5 pl-12 rounded-3xl text-sm font-bold focus:border-lime/40 transition-all text-white placeholder:uppercase"
                                  value={formData.phone}
                                  onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                                />
@@ -453,9 +520,83 @@ export default function Profile() {
 
           <div className="glass p-10 rounded-[48px] space-y-8 border-white/5">
              <div className="space-y-1">
-                <h3 className="text-3xl font-display font-black uppercase italic tracking-tight">Security <span className="text-white/40">Vault</span></h3>
-                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Your account metadata</p>
+                <h3 className="text-3xl font-display font-black uppercase italic tracking-tight">Game <span className="text-white/40">Preferences</span></h3>
+                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Tailor your search experience</p>
              </div>
+             
+             <div className="space-y-6">
+                <div className="space-y-3">
+                   <label className="text-[10px] uppercase font-black text-slate-500 tracking-[0.2em] ml-1">Default Sport Discipline</label>
+                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {['Pickleball', 'Tennis', 'Badminton', 'Basketball', 'Football', 'None'].map((sport) => (
+                        <button
+                          key={sport}
+                          disabled={!isEditing}
+                          onClick={() => setFormData(prev => ({ ...prev, default_sport: sport === 'None' ? '' : sport }))}
+                          className={`p-4 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all ${
+                            (formData.default_sport === sport || (sport === 'None' && !formData.default_sport))
+                            ? 'bg-lime text-charcoal border-lime shadow-lg shadow-lime/20'
+                            : 'glass border-white/5 text-slate-500 hover:border-white/10 disabled:opacity-50'
+                          }`}
+                        >
+                          {sport}
+                        </button>
+                      ))}
+                   </div>
+                   <p className="text-[9px] text-slate-600 uppercase font-bold tracking-widest pl-1 mt-2">This filter is automatically applied during search sessions.</p>
+                </div>
+             </div>
+          </div>
+
+          <div className="glass p-10 rounded-[48px] border-white/5 space-y-8">
+             <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                   <h3 className="text-3xl font-display font-black uppercase italic tracking-tight">Social <span className="text-white/40">Proof</span></h3>
+                   <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Manage your past feedback</p>
+                </div>
+                <div className="px-4 py-2 glass border-white/10 rounded-full text-xs font-black uppercase tracking-widest text-slate-500">
+                   {userReviews.length} Reviews
+                </div>
+             </div>
+
+             <div className="space-y-4 max-h-[600px] overflow-y-auto no-scrollbar pr-2">
+                {userReviews.length === 0 ? (
+                  <div className="p-12 glass rounded-3xl border-dashed border-white/10 text-center space-y-4">
+                     <MessageSquare className="mx-auto text-white/10" size={32} />
+                     <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 italic leading-relaxed">Your voice hasn't been heard yet.<br/>Book a game to leave a review.</p>
+                  </div>
+                ) : userReviews.map((review) => (
+                    <div key={review.id} className="p-8 glass rounded-[32px] border-white/5 space-y-6 group hover:border-white/10 transition-all">
+                       <div className="flex justify-between items-start">
+                          <div className="space-y-1">
+                             <p className="text-[9px] font-black uppercase tracking-widest text-lime">{review.facilities?.name}</p>
+                             <div className="flex gap-1">
+                                {[...Array(5)].map((_, i) => (
+                                  <Star key={i} size={10} className={i < review.rating ? 'text-amber-400 fill-amber-400' : 'text-white/10'} />
+                                ))}
+                             </div>
+                          </div>
+                          <button 
+                            onClick={() => deleteReview(review.id)}
+                            className="w-10 h-10 glass rounded-xl flex items-center justify-center text-slate-600 hover:text-red-500 transition-colors"
+                          >
+                             <Trash2 size={16} />
+                          </button>
+                       </div>
+                       <p className="text-sm font-medium text-slate-300 italic">"{review.comment}"</p>
+                       <div className="flex items-center justify-between pt-4 border-t border-white/5">
+                          <p className="text-[8px] font-black uppercase tracking-widest text-slate-600">{new Date(review.created_at).toLocaleDateString()}</p>
+                          {review.owner_reply && (
+                            <div className="flex items-center gap-2 text-lime uppercase text-[8px] font-black tracking-widest">
+                               <ShieldCheck size={10} /> Owner Replied
+                            </div>
+                          )}
+                       </div>
+                    </div>
+                  ))
+                }
+             </div>
+          </div>
              
              <div className="space-y-4">
                 <div className="flex items-center justify-between p-6 glass rounded-3xl border-white/5">

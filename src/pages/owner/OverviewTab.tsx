@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, User, Plus, Calendar, CheckCircle2, Star, Clock, ShieldAlert, Share2, Copy, QrCode, Loader2, Trash2, Edit3 } from 'lucide-react';
+import { Activity, User, Plus, Calendar, CheckCircle2, Star, Clock, ShieldAlert, Share2, Copy, QrCode, Loader2, Trash2, Edit3, Database } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'motion/react';
 import { StatCard } from './components/StatCard';
@@ -80,53 +80,34 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             </h2>
             <div className="flex flex-wrap gap-3 w-full lg:w-auto">
               <Link 
-                to={`/facility-hub/live-monitor?facilityId=${selectedFacilityId}`}
+                to={`/owner?tab=courts&facilityId=${selectedFacilityId}`}
                 className="flex-1 sm:flex-none min-w-fit h-[52px] bg-lime text-charcoal px-6 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:scale-105 active:scale-95 shadow-xl shadow-lime/20 whitespace-nowrap"
               >
-                <Activity size={14} /> Monitor
+                <Database size={14} /> Inventory
               </Link>
               <button 
                 onClick={onManualEntry}
                 className="flex-1 sm:flex-none min-w-fit h-[52px] glass border-white/10 text-white px-6 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:border-white/20 active:scale-95 transition-all whitespace-nowrap"
               >
-                <User size={14} /> Manual
-              </button>
-              <button 
-                disabled={isUpdating}
-                onClick={onAddCourt}
-                className="flex-1 sm:flex-none min-w-fit h-[52px] bg-white/10 text-white px-6 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-white/20 active:scale-95 transition-all disabled:opacity-50 whitespace-nowrap"
-              >
-                {isUpdating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} 
-                Add Court
+                 <User size={14} /> Manual Block
               </button>
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {courts.map(court => (
+            {courts.slice(0, 4).map(court => (
               <div key={court.id} className="p-8 rounded-[40px] glass border-white/5 group relative hover:border-lime/40 transition-all">
                 <div className="flex justify-between items-start mb-6">
                     <div className="w-14 h-14 glass rounded-2xl flex items-center justify-center font-display font-black italic text-lime border-lime/20 uppercase">
-                      C{court.name.split(' ').pop()}
+                      {court.sport.charAt(0)}
                     </div>
-                     <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                        <button 
-                          disabled={isUpdating}
-                          onClick={() => onEditCourt(court)}
-                          className="w-10 h-10 glass rounded-xl flex items-center justify-center hover:text-lime hover:border-lime/40 active:scale-95 transition-all disabled:opacity-50"
-                        >
-                          <Edit3 size={16} />
-                        </button>
-                        <button 
-                          disabled={isUpdating}
-                          onClick={() => onDeleteCourt(court)}
-                          className="w-10 h-10 glass rounded-xl flex items-center justify-center hover:text-red-400 hover:border-red-400/40 active:scale-95 transition-all disabled:opacity-50"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                     <div className="flex gap-2">
+                        <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${court.is_active ? 'bg-lime/20 text-lime' : 'bg-red-500/20 text-red-400'}`}>
+                          {court.is_active ? 'Active' : 'Inactive'}
+                        </div>
                      </div>
                 </div>
                 <h3 className="text-2xl font-display font-black uppercase italic text-white/90">{court.name}</h3>
-                <p className="text-xs font-bold text-slate-400 mb-6 uppercase tracking-widest leading-none">₱{court.hourly_rate}/hour session</p>
+                <p className="text-xs font-bold text-slate-400 mb-6 uppercase tracking-widest leading-none">{court.hourly_rate} / hour</p>
                 <button 
                   onClick={() => onViewSchedule(court)}
                   className="text-[10px] uppercase font-bold tracking-[0.2em] text-lime flex items-center gap-2 hover:gap-4 transition-all"
@@ -135,6 +116,15 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                 </button>
               </div>
             ))}
+            {courts.length > 4 && (
+              <Link 
+                 to={`/owner?tab=courts&facilityId=${selectedFacilityId}`}
+                 className="flex flex-col items-center justify-center p-8 rounded-[40px] glass border-dashed border-white/10 text-slate-500 hover:text-white hover:border-white/20 transition-all"
+              >
+                <Plus size={24} className="mb-2" />
+                <span className="text-[10px] font-black uppercase tracking-widest">View {courts.length - 4} More Courts</span>
+              </Link>
+            )}
           </div>
         </section>
 

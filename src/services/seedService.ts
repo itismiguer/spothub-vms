@@ -2,7 +2,7 @@ import { supabase } from '../lib/supabase';
 
 export const seedDemoData = async (userEmail: string, userId: string) => {
   try {
-    console.log('Starting seed process...');
+    // Starting seed process...
 
     // 1. Update/Ensure User Profile
     const { error: profileError } = await supabase
@@ -54,15 +54,25 @@ export const seedDemoData = async (userEmail: string, userId: string) => {
     for (const facData of dummyFacilities) {
       // Check if already exists
       const { data: existing } = await supabase
-        .from('facilities')
+        .from('venues')
         .select('id')
         .eq('name', facData.name)
         .maybeSingle();
       
       if (!existing) {
         const { data: newFac, error: facError } = await supabase
-          .from('facilities')
-          .insert(facData)
+          .from('venues')
+          .insert({
+            name: facData.name,
+            description: facData.description,
+            address: facData.address,
+            latitude: facData.lat,
+            longitude: facData.lng,
+            images: facData.images,
+            owner_id: facData.owner_id,
+            status: 'ACTIVE',
+            slug: facData.name.toLowerCase().replace(/ /g, '-')
+          })
           .select()
           .single();
         
@@ -74,6 +84,9 @@ export const seedDemoData = async (userEmail: string, userId: string) => {
           facility_id: newFac.id,
           name: cName,
           hourly_rate: 350,
+          sport: facData.type.toUpperCase(),
+          environment: 'OUTDOOR',
+          surface: 'HARD',
           is_active: true
         }));
 

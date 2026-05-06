@@ -54,11 +54,11 @@ export default function BookingManagementCenter() {
     try {
       let query = supabase.from('bookings').select('*').order('start_time', { ascending: false });
       
-      const isSuperAdmin = profile.email === 'miguel@builtbymiguel.net' || profile.role === 'super_admin';
+      const isSuperAdmin = profile.email === 'miguel@builtbymiguel.net' || profile.role === 'SUPER_ADMIN';
 
       if (profile.role !== 'ADMIN' && !isSuperAdmin) {
-        // Find facilities owned by this user first
-        const { data: ownFacilities } = await supabase.from('facilities').select('id').eq('owner_id', user.id);
+        // Find venues owned by this user first
+        const { data: ownFacilities } = await supabase.from('venues').select('id').eq('owner_id', user.id);
         const facilityIds = ownFacilities?.map(f => f.id) || [];
         query = query.in('facility_id', facilityIds);
       }
@@ -114,7 +114,7 @@ export default function BookingManagementCenter() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload) => {
         if (payload.eventType === 'INSERT') {
           const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-          audio.play().catch(e => console.log('Autoplay blocked'));
+          audio.play().catch(e => {});
           toast.info('NEW SIGNAL DETECTED: Incoming Booking');
         }
         fetchBookings();
@@ -156,8 +156,12 @@ export default function BookingManagementCenter() {
   }
 
   return (
-    <div className="min-h-screen bg-charcoal text-white pt-20 pb-32 overflow-hidden">
-      <div className="max-w-[1600px] mx-auto px-6 h-[calc(100vh-140px)] flex flex-col">
+    <div className="min-h-screen bg-transparent text-white pt-20 pb-32 relative overflow-x-hidden">
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-30" />
+        <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
+      </div>
+      <div className="max-w-[1600px] mx-auto px-6 h-[calc(100vh-140px)] flex flex-col relative z-10">
         <header className="flex flex-col md:flex-row items-start md:items-center justify-between py-8 gap-6 flex-shrink-0">
           <div className="flex items-center gap-6">
              <div className="w-16 h-16 bg-lime rounded-[24px] flex items-center justify-center text-charcoal shadow-[0_0_30px_rgba(181,245,90,0.3)] animate-pulse">

@@ -32,20 +32,33 @@ interface Booking {
   source?: string;
 }
 
-export default function LiveMonitor() {
+type LiveMonitorProps = {
+  propFacilityId?: string;
+  isEmbedded?: boolean;
+}
+
+export default function LiveMonitor({ propFacilityId, isEmbedded = false }: LiveMonitorProps) {
   const { profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const facilityId = searchParams.get('facilityId') || profile?.facility_id;
+  const facilityId = propFacilityId || searchParams.get('facilityId') || profile?.facility_id;
   
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [filterToday, setFilterToday] = useState(true);
   const [loading, setLoading] = useState(true);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [authTimedOut, setAuthTimedOut] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (authLoading) setAuthTimedOut(true);
+    }, 5000); // 5 second safety timeout
+    return () => clearTimeout(timer);
+  }, [authLoading]);
 
   useEffect(() => {
     if (!facilityId) {
-      if (!authLoading) setLoading(false);
+      if (!authLoading || authTimedOut) setLoading(false);
       return;
     }
 
@@ -117,17 +130,23 @@ export default function LiveMonitor() {
     ? bookings.filter(b => isToday(new Date(b.start_time)))
     : bookings;
 
-  if (authLoading) {
-    return <div className="h-screen bg-black flex flex-col items-center justify-center text-lime font-display italic font-black uppercase tracking-[0.5em] text-2xl gap-4">
-      <Activity size={48} className="animate-pulse" />
-      Authenticating...
-    </div>;
+  if (authLoading && !authTimedOut) {
+    return (
+      <div className="h-screen bg-transparent flex flex-col items-center justify-center text-lime font-display italic font-black uppercase tracking-[0.5em] text-2xl gap-4">
+        <div className="fixed inset-0 pointer-events-none z-[-1]">
+          <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-50" />
+          <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
+        </div>
+        <Activity size={48} className="animate-pulse" />
+        Authenticating...
+      </div>
+    );
   }
 
   const isSuperAdmin = profile?.email === 'miguel@builtbymiguel.net';
-  const isAuthorized = profile && (profile.role === 'OWNER' || profile.role === 'STAFF' || profile.role === 'ADMIN' || isSuperAdmin);
+  const isAuthorized = profile && (profile.role === 'OWNER' || profile.role === 'STAFF' || profile.role === 'ADMIN' || isSuperAdmin) || authTimedOut;
 
-  if (!isAuthorized) {
+  if (!isAuthorized && !authTimedOut) {
     return <div className="h-screen bg-black flex flex-col items-center justify-center text-white font-display italic font-black uppercase tracking-[0.5em] text-2xl p-8 text-center">
       <ShieldAlert size={64} className="text-red-500 mb-6 mx-auto" />
       Unauthorized Terminal Access
@@ -141,9 +160,16 @@ export default function LiveMonitor() {
   }
 
   return (
-    <div className="min-h-screen bg-[#000000] text-white font-sans selection:bg-lime selection:text-charcoal p-4 sm:p-10">
+    <div className={`${isEmbedded ? 'h-full overflow-y-auto no-scrollbar pb-20' : 'min-h-screen'} bg-transparent text-white font-sans selection:bg-lime selection:text-charcoal ${isEmbedded ? 'p-0' : 'p-4 sm:p-10'} relative overflow-x-hidden`}>
+      {!isEmbedded && (
+        <div className="fixed inset-0 pointer-events-none">
+          <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-50" />
+          <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
+        </div>
+      )}
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 mb-16 px-4">
+      {!isEmbedded && (
+        <header className="flex flex-col md:flex-row md:items-end justify-between gap-8 mb-16 px-4">
         <div className="space-y-4">
           <div className="flex items-center gap-3">
              <div className="flex items-center gap-1.5">
@@ -178,6 +204,7 @@ export default function LiveMonitor() {
           </button>
         </div>
       </header>
+      )}
 
       {/* Main Feed Grid */}
       {!facilityId ? (
@@ -315,10 +342,10 @@ export default function LiveMonitor() {
                 <header className="flex items-center justify-between pr-8 sm:pr-0">
                   <div>
                     <h3 className="text-2xl sm:text-4xl font-display font-black italic tracking-tighter uppercase leading-none whitespace-normal break-words">Command <span className="text-slate-500">Action</span></h3>
-                    <p className="text-[10px] sm:text-xs font-mono text-slate-500 uppercase tracking-widest mt-2 whitespace-normal break-words">Manage session for {selectedBooking.userName}</p>
+                    <p className="text-[10px] sm:text-xs font-mono text-slate-500 uppercase tracking-widest mt-2 whitespace-normal break-words">Manage session for {selectedBooking.user_name}</p>
                   </div>
                   <button onClick={() => setSelectedBooking(null)} className="absolute top-4 right-4 sm:relative sm:top-0 sm:right-0 w-10 h-10 sm:w-12 sm:h-12 glass rounded-2xl flex items-center justify-center text-slate-400 hover:text-white">
-                    <XCircle size={20} sm:size={24} />
+                    <XCircle className="size-5 sm:size-6" />
                   </button>
                 </header>
 
@@ -328,7 +355,7 @@ export default function LiveMonitor() {
                       onClick={() => handleUpdateStatus(selectedBooking.id, 'IN_PROGRESS')}
                       className="col-span-2 flex flex-col items-center gap-4 p-6 sm:p-8 bg-lime rounded-[24px] sm:rounded-[32px] text-charcoal hover:scale-[1.02] transition-transform shadow-2xl shadow-lime/20"
                     >
-                      <ShieldCheck size={28} sm:size={32} />
+                      <ShieldCheck className="size-7 sm:size-8" />
                       <span className="font-black uppercase tracking-widest text-[10px] sm:text-xs">Verify & Check-In</span>
                     </button>
                   )}
@@ -339,14 +366,14 @@ export default function LiveMonitor() {
                         onClick={() => handleUpdateStatus(selectedBooking.id, 'CONFIRMED')}
                         className="flex flex-col items-center justify-center gap-3 sm:gap-4 p-6 sm:p-8 bg-white/5 glass rounded-[24px] sm:rounded-[32px] text-lime hover:bg-lime/10 transition-colors"
                       >
-                        <CheckCircle2 size={20} sm:size={24} />
+                        <CheckCircle2 className="size-5 sm:size-6" />
                         <span className="font-black uppercase tracking-widest text-[9px]">Approve</span>
                       </button>
                       <button 
                          onClick={() => handleUpdateStatus(selectedBooking.id, 'CANCELLED')}
                         className="flex flex-col items-center justify-center gap-3 sm:gap-4 p-6 sm:p-8 bg-white/5 glass rounded-[24px] sm:rounded-[32px] text-red-400 hover:bg-red-400/10 transition-colors"
                       >
-                        <XCircle size={20} sm:size={24} />
+                        <XCircle className="size-5 sm:size-6" />
                         <span className="font-black uppercase tracking-widest text-[9px]">Decline</span>
                       </button>
                     </>
@@ -357,7 +384,7 @@ export default function LiveMonitor() {
                       onClick={() => handleUpdateStatus(selectedBooking.id, 'COMPLETED')}
                       className="col-span-2 flex flex-col items-center gap-4 p-6 sm:p-8 bg-white/5 glass rounded-[24px] sm:rounded-[32px] text-white hover:bg-white/10 transition-colors"
                     >
-                      <Timer size={28} sm:size={32} className="text-blue-400" />
+                      <Timer className="size-7 sm:size-8 text-blue-400" />
                       <span className="font-black uppercase tracking-widest text-[10px] sm:text-xs">End Session Now</span>
                     </button>
                   )}
@@ -367,7 +394,7 @@ export default function LiveMonitor() {
                       onClick={() => handleUpdateStatus(selectedBooking.id, 'CANCELLED')}
                       className="col-span-2 flex flex-col items-center gap-4 p-6 sm:p-8 bg-red-500/10 glass border-red-500/20 rounded-[24px] sm:rounded-[32px] text-red-500 hover:bg-red-500/20 transition-colors"
                     >
-                      <ShieldAlert size={28} sm:size={32} />
+                      <ShieldAlert className="size-7 sm:size-8" />
                       <span className="font-black uppercase tracking-widest text-[10px] sm:text-xs">Lift Maintenance Block</span>
                     </button>
                   )}

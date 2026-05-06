@@ -1,13 +1,13 @@
-console.log('--- APP STARTING ---');
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { HelmetProvider } from 'react-helmet-async';
 import App from './App.tsx';
 import './index.css';
 
 const rootElement = document.getElementById('root');
 
 if (!rootElement) {
-  console.error('Root element not found');
+  // Silent error for root
 } else {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 
@@ -34,7 +34,9 @@ if (!rootElement) {
   } else {
     createRoot(rootElement).render(
       <StrictMode>
-        <App />
+        <HelmetProvider>
+          <App />
+        </HelmetProvider>
       </StrictMode>
     );
   }

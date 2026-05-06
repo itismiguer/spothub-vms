@@ -64,7 +64,7 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
                 <div className={`w-16 h-16 rounded-[24px] flex items-center justify-center font-display font-black italic text-2xl border ${
                   booking.status === 'PENDING' || booking.status === 'RESERVED' || booking.status === 'PENDING_PROOF' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 
                   booking.status === 'UNDER_REVIEW' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                  booking.status === 'CONFIRMED' ? 'bg-[#CCFF00]/10 text-[#CCFF00] border-[#CCFF00]/20' : 
+                  booking.status === 'CONFIRMED' ? 'bg-[#B5F55A]/10 text-[#B5F55A] border-[#B5F55A]/20' : 
                   'bg-white/5 text-slate-500 border-white/10'
                 }`}>
                   {['PENDING', 'RESERVED', 'PENDING_PROOF'].includes(booking.status) ? '?' : 
@@ -106,7 +106,7 @@ export const BookingsTab: React.FC<BookingsTabProps> = ({
                       <button 
                         disabled={isUpdating}
                         onClick={() => onApproveBooking(booking.id)}
-                        className="flex-1 min-w-fit h-auto bg-[#CCFF00] text-charcoal px-6 sm:px-8 py-4 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-lg shadow-[#CCFF00]/20 font-bold disabled:opacity-50 whitespace-nowrap"
+                        className="flex-1 min-w-fit h-auto bg-[#B5F55A] text-charcoal px-6 sm:px-8 py-4 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-lg shadow-[#B5F55A]/20 font-bold disabled:opacity-50 whitespace-nowrap"
                       >
                         {isUpdating ? <Loader2 size={14} className="animate-spin" /> : 'Approve'}
                       </button>

@@ -1,253 +1,308 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  Search, 
+  MapPin, 
+  ArrowRight, 
+  Activity,
+  ChevronRight,
+  Star,
+  Zap,
+  Globe,
+  Radio,
+  Clock,
+  Filter,
+  RefreshCw
+} from 'lucide-react';
+import { Helmet } from 'react-helmet-async';
+import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Link, useNavigate } from 'react-router-dom';
-import { MapPin, Star, Clock, Activity, Zap, Search, ChevronRight } from 'lucide-react';
-import { motion } from 'motion/react';
-import DiscoveryMap from '../components/DiscoveryMap';
-import Selector from '../components/Selector';
+import { useAuth } from '../contexts/AuthContext';
 import { Facility } from '../types';
 
 export default function Home() {
-  const [facilities, setFacilities] = useState<Facility[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCity, setSelectedCity] = useState('All');
-  const [selectedSport, setSelectedSport] = useState('All');
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [forcedCenter, setForcedCenter] = useState<{ lat: number; lng: number } | null>(null);
   const navigate = useNavigate();
-
-  const CITIES = [
-    { name: 'All', lat: 9.3068, lng: 123.3039 },
-    { name: 'Dumaguete', lat: 9.3068, lng: 123.3039 },
-    { name: 'Valencia', lat: 9.2828, lng: 123.2458 },
-    { name: 'Sibulan', lat: 9.3562, lng: 123.2847 },
-    { name: 'Bacong', lat: 9.2472, lng: 123.2950 }
-  ];
-
-  const SPORTS = [
-    'All', 'Basketball', 'Pickleball', 'Tennis', 'Badminton', 'Volleyball', 
-    'Gym', 'Swimming Pool', 'Football', 'Futsal', 'Padel'
-  ];
+  const { user } = useAuth();
+  const [citySearch, setCitySearch] = useState('');
+  const [cities, setCities] = useState<{ city: string; country_code: string }[]>([]);
+  const [showCities, setShowCities] = useState(false);
+  const [trending, setTrending] = useState<Facility[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setUserLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
+    fetchInitialData();
+  }, []);
+
+  const fetchInitialData = async () => {
+    setLoading(true);
+    try {
+      const { data: cityData } = await supabase
+        .from('venues')
+        .select('city, country_code')
+        .eq('status', 'LIVE');
+      
+      if (cityData) {
+        const uniqueCities = Array.from(new Set(cityData.map(c => `${c.city}|${c.country_code}`)))
+          .map(str => {
+            const [city, country_code] = str.split('|');
+            return { city, country_code };
           });
-        },
-        (error) => {
-          // If the user denies or there's an issue, we just log it once gently
-          // and don't spam the console if it's code 1 (PERMISSION_DENIED)
-          if (error.code !== 1) {
-            console.warn("Geolocation non-critical error:", error.message);
-          }
-        },
-        { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
-      );
-    }
-  }, []);
-
-  useEffect(() => {
-    async function fetchFacilities() {
-      try {
-        const { data, error } = await supabase
-          .from('facilities')
-          .select('*')
-          .limit(20);
-        
-        if (error) throw error;
-        
-        setFacilities((data || []).filter(f => f.status !== 'DEACTIVATED') as Facility[]);
-      } catch (error) {
-        console.error('Error fetching facilities:', error);
-      } finally {
-        setLoading(false);
+        setCities(uniqueCities);
       }
-    }
-    fetchFacilities();
-  }, []);
 
-  const filteredFacilities = facilities
-    .filter(f => {
-      const matchesSearch = f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          f.address.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCity = selectedCity === 'All' || f.address.toLowerCase().includes(selectedCity.toLowerCase());
-      const matchesSport = selectedSport === 'All' || f.type.toLowerCase().includes(selectedSport.toLowerCase());
-      return matchesSearch && matchesCity && matchesSport;
-    })
-    .sort((a, b) => {
-      if (!userLocation) return 0;
-      const distA = Math.sqrt(Math.pow(a.lat - userLocation.lat, 2) + Math.pow(a.lng - userLocation.lng, 2));
-      const distB = Math.sqrt(Math.pow(b.lat - userLocation.lat, 2) + Math.pow(b.lng - userLocation.lng, 2));
-      return distA - distB;
-    });
+      const { data: trendData } = await supabase
+        .from('venues')
+        .select('*')
+        .eq('status', 'LIVE')
+        .order('id', { ascending: true }) // Using alphabetical for "Premium" feel
+        .limit(6);
+      
+      setTrending(trendData || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredCities = cities.filter(c => 
+    c.city?.toLowerCase().includes(citySearch.toLowerCase())
+  );
 
   return (
-    <div className="space-y-12 pb-20">
-      {/* Hero Section */}
-      <section className="pt-10 relative">
-        <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="space-y-8 relative z-10"
-          >
-            <div className="inline-flex items-center gap-2 bg-lime/10 backdrop-blur-md px-4 py-2 rounded-full border border-lime/20">
-              <Zap size={14} className="text-lime fill-lime" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-lime">New Venues Added</span>
-            </div>
-            
-            <h1 className="text-6xl sm:text-8xl font-display font-black tracking-tighter uppercase italic leading-[0.85]">
-              Own The <span className="text-lime">Court</span>
-              <br />
-              Define The <span className="text-white/40">Game</span>
-            </h1>
-            
-            <p className="text-slate-400 text-lg max-w-md leading-relaxed">
-              Experience the future of sports reservations. Instant booking and real-time availability at your fingertips.
-            </p>
+    <div className="min-h-screen bg-transparent text-white relative overflow-x-hidden">
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-50" />
+        <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
+      </div>
+      <Helmet>
+        <title>Reserve | Book Elite Sports Venues Locally and Globally</title>
+        <meta name="description" content="Discover and book professional sports courts near you. Padel, Pickleball, Tennis and more." />
+      </Helmet>
 
-            <div className="flex items-center gap-4">
-              <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" size={20} />
+      {/* Hero Section */}
+      <section className="relative pt-20 pb-8 px-8 overflow-hidden">
+        <div className="max-w-[1440px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-20 items-center">
+          
+          {/* Left Column: Content */}
+          <motion.div 
+            initial={{ opacity: 0, x: -30 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="space-y-10"
+          >
+            <div className="space-y-6">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 border border-lime/30 rounded-full text-lime bg-lime/5">
+                <Zap size={14} fill="currentColor" />
+                <span className="text-[10px] font-black uppercase tracking-widest">New Venues Added</span>
+              </div>
+              
+              <h1 className="text-6xl md:text-8xl font-display font-black uppercase italic tracking-tighter leading-[0.85] text-white">
+                Own the <br /> 
+                <span className="text-lime">Court</span> <br />
+                Define the <br />
+                <span className="text-white/40">Game</span>
+              </h1>
+              
+              <p className="max-w-md text-slate-400 text-lg leading-relaxed font-medium">
+                Experience the future of sports reservations. Instant booking and real-time availability at your fingertips.
+              </p>
+
+        <div className="flex flex-wrap gap-4 pt-4">
+          {!user ? (
+            <>
+              <Link 
+                to="/register"
+                className="bg-lime text-charcoal px-8 py-5 rounded-[32px] font-black uppercase tracking-widest text-[11px] hover:scale-105 active:scale-95 transition-all shadow-xl shadow-lime/20 flex items-center gap-3 group"
+              >
+                Join the Network
+                <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+              </Link>
+              <Link 
+                to="/login"
+                className="px-8 py-5 rounded-[32px] font-black uppercase tracking-widest text-[11px] border border-white/10 hover:bg-white/5 transition-all flex items-center justify-center text-white"
+              >
+                Operator Login
+              </Link>
+            </>
+          ) : (
+            <Link 
+              to="/owner"
+              className="bg-lime text-charcoal px-8 py-5 rounded-[32px] font-black uppercase tracking-widest text-[11px] hover:scale-105 active:scale-95 transition-all shadow-xl shadow-lime/20 flex items-center gap-3 group"
+            >
+              Enter Control Center
+              <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+            </Link>
+          )}
+        </div>
+            </div>
+
+            <div className="max-w-md relative group">
+              <div className="relative flex items-center">
                 <input 
-                  type="text"
+                  type="text" 
                   placeholder="Search club or city..."
-                  className="w-full h-14 bg-white/5 backdrop-blur-2xl border border-white/10 px-12 rounded-2xl focus:outline-none focus:border-lime/40 transition-colors focus:ring-2 focus:ring-lime/20"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  value={citySearch}
+                  onChange={(e) => {
+                    setCitySearch(e.target.value);
+                    setShowCities(true);
+                  }}
+                  onFocus={() => setShowCities(true)}
+                  className="w-full h-16 bg-white/[0.03] border border-white/5 p-6 rounded-2xl text-sm focus:border-lime/40 outline-none transition-all placeholder:text-slate-600"
                 />
+                
+                <AnimatePresence>
+                  {showCities && citySearch && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      className="absolute top-18 left-0 right-0 glass border-white/10 p-2 rounded-2xl z-50 max-h-[300px] overflow-y-auto"
+                    >
+                      {filteredCities.map((c) => (
+                        <button
+                          key={`${c.city}-${c.country_code}`}
+                          onClick={() => {
+                            navigate(`/${c.country_code.toLowerCase()}/${c.city.toLowerCase()}`);
+                            setShowCities(false);
+                          }}
+                          className="w-full p-4 flex items-center justify-between hover:bg-white/5 rounded-xl transition-all group/item text-left"
+                        >
+                          <div className="flex items-center gap-3">
+                             <MapPin className="text-slate-500 group-hover/item:text-lime" size={16} />
+                             <span className="text-[11px] font-bold uppercase tracking-widest">{c.city}, {c.country_code}</span>
+                          </div>
+                          <ChevronRight size={14} className="text-slate-500 group-hover/item:translate-x-1 transition-all" />
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
           </motion.div>
 
+          {/* Right Column: Interactive Card */}
           <motion.div 
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="relative lg:block"
+            initial={{ opacity: 0, x: 30 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="hidden lg:block relative"
           >
-            <div className="absolute inset-0 bg-lime/20 rounded-[40px] blur-3xl" />
-            <div className="relative aspect-[4/3] sm:aspect-video glass rounded-[40px] overflow-hidden group">
-              <DiscoveryMap 
-                facilities={filteredFacilities} 
-                onSelectFacility={(id) => navigate(`/facility/${id}`)} 
-                userLocation={userLocation} 
-                forcedCenter={forcedCenter}
-              />
+            <div className="glass rounded-[48px] border-white/5 p-12 aspect-[4/3] flex flex-col items-center justify-center text-center space-y-8 relative overflow-hidden group">
+              {/* Background Map-like texture */}
+              <div className="absolute inset-0 opacity-10 pointer-events-none">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_#333_1px,_transparent_1px)] [background-size:20px_20px]" />
+              </div>
+              
+              <div className="w-24 h-24 rounded-full bg-white/5 flex items-center justify-center border border-white/10 shadow-[0_0_50px_rgba(255,255,255,0.05)]">
+                <Globe className="text-white/40" size={40} />
+              </div>
+
+              <div className="space-y-4 relative z-10">
+                <h3 className="text-2xl font-display font-black uppercase italic tracking-tight">Interactive Network</h3>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 max-w-[200px] mx-auto leading-relaxed">
+                  Visualizing {trending.length} Premium Sport Venues Across the Region.
+                </p>
+              </div>
+
+              <div className="px-6 py-2 bg-white/5 border border-white/10 rounded-full flex items-center gap-2">
+                <div className="w-1.5 h-1.5 bg-lime rounded-full animate-ping" />
+                <span className="text-[9px] font-black uppercase tracking-widest">Incredoball Sports Center</span>
+              </div>
+
+              <div className="pt-8 flex items-center gap-2 text-lime/40">
+                <Radio size={14} />
+                <span className="text-[8px] font-black uppercase tracking-widest">Coordinates Active / Live Monitoring</span>
+              </div>
+
+              {/* Glow effect */}
+              <div className="absolute -inset-[100%] bg-lime/10 blur-[120px] rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-1000" />
             </div>
           </motion.div>
         </div>
       </section>
 
-      {/* Featured Venues */}
-      <section className="max-w-7xl mx-auto space-y-8">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+      {/* Premium Venues Section */}
+      <section className="max-w-[1440px] mx-auto px-8 pt-4 pb-32 space-y-16">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 border-b border-white/5 pb-12">
           <div className="space-y-2">
-            <h2 className="text-4xl font-display font-black uppercase italic tracking-tight">Premium <span className="text-white/40">Venues</span></h2>
-            <p className="text-slate-400 text-sm">Discover top-rated facilities near you.</p>
+            <h2 className="text-4xl font-display font-black uppercase italic tracking-tight">
+              Premium <span className="text-white/40">Venues</span>
+            </h2>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Discover top-rated facilities near you.</p>
           </div>
-          
-          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-            {/* City Filter */}
-            <div className="w-full sm:w-48">
-              <Selector 
-                options={CITIES.map(c => ({ id: c.name, label: c.name === 'All' ? 'Every City' : c.name }))}
-                selectedId={selectedCity}
-                onSelect={(id) => {
-                  setSelectedCity(id);
-                  const cityData = CITIES.find(c => c.name === id);
-                  if (cityData && id !== 'All') {
-                    setForcedCenter({ lat: cityData.lat, lng: cityData.lng });
-                  } else {
-                    setForcedCenter(null);
-                  }
-                }}
-                variant="compact"
-                placeholder="Choose City"
-              />
-            </div>
 
-            {/* Sport Filter */}
-            <div className="w-full sm:w-48">
-              <Selector 
-                options={SPORTS.map(s => ({ id: s, label: s === 'All' ? 'All Sports' : s }))}
-                selectedId={selectedSport}
-                onSelect={setSelectedSport}
-                variant="compact"
-                placeholder="Filter Sport"
-              />
-            </div>
-
-            <button 
-              onClick={() => { setSelectedCity('All'); setSelectedSport('All'); setSearchQuery(''); }}
-              className="text-[10px] font-bold uppercase tracking-widest text-white/40 hover:text-white transition-colors ml-2"
-            >
-              Reset
-            </button>
+          <div className="flex items-center gap-3">
+             <button 
+               onClick={() => navigate('/search')}
+               className="h-12 px-6 glass rounded-2xl border-white/5 hover:border-white/20 transition-all flex items-center gap-3 group"
+             >
+                <div className="w-1.5 h-1.5 bg-lime rounded-full" />
+                <span className="text-[10px] font-black uppercase tracking-widest">Every City</span>
+                <ChevronRight size={14} className="rotate-90 text-slate-500" />
+             </button>
+             <button 
+               onClick={() => navigate('/search')}
+               className="h-12 px-6 glass rounded-2xl border-white/5 hover:border-white/20 transition-all flex items-center gap-3 group"
+             >
+                <div className="w-1.5 h-1.5 bg-lime rounded-full" />
+                <span className="text-[10px] font-black uppercase tracking-widest">All Sports</span>
+                <ChevronRight size={14} className="rotate-90 text-slate-500" />
+             </button>
+             <button 
+               onClick={() => {
+                 setCitySearch('');
+                 navigate('/search');
+               }}
+               className="h-12 px-6 text-slate-500 hover:text-white transition-all"
+             >
+                <span className="text-[10px] font-black uppercase tracking-widest">Reset</span>
+             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-          {loading ? (
-            [1, 2, 3].map(i => <div key={i} className="aspect-[4/3] glass rounded-[32px] animate-pulse" />)
-          ) : filteredFacilities.length === 0 ? (
-            <div className="col-span-full py-20 text-center">
-               <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/5 border border-white/10 mb-4">
-                 <Search size={24} className="text-white/20" />
-               </div>
-               <h3 className="text-xl font-display font-bold uppercase italic mb-2">No venues found</h3>
-               <p className="text-slate-500 text-sm">Try adjusting your filters or search query.</p>
-            </div>
-          ) : (
-            filteredFacilities.map((f, idx) => (
-              <motion.div
-                key={f.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.1 }}
-              >
-                <Link to={`/facility/${f.id}`} className="group block space-y-4">
-                  <div className="relative aspect-[4/3] rounded-[32px] overflow-hidden glass mb-4">
-                    <img 
-                      src={f.images?.[0] || 'https://images.unsplash.com/photo-1599586120429-48281b6f0ece?auto=format&fit=crop&q=80&w=800'} 
-                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" 
-                      alt={f.name} 
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-80" />
-                    
-                    <div className="absolute top-4 left-4 bg-lime/10 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-bold text-lime tracking-widest uppercase border border-lime/20">
-                      {f.type}
-                    </div>
-                    
-                    <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-white/80 text-xs">
-                        <MapPin size={12} className="text-lime" />
-                        {f.address.split(',')[0]}
-                      </div>
-                      <div className="flex items-center gap-1 glass px-2 py-1 rounded-lg text-[10px] font-bold">
-                        <Star size={10} className="text-lime fill-lime" />
-                        4.9
-                      </div>
-                    </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+          {trending.map((v) => (
+            <Link 
+              key={v.id} 
+              to={`/${v.country_code?.toLowerCase()}/${v.city?.toLowerCase()}/${v.slug}`}
+              className="group space-y-6"
+            >
+              <div className="h-[400px] relative rounded-[40px] overflow-hidden border border-white/5">
+                <img 
+                  loading="lazy" 
+                  src={v.images?.[0]} 
+                  className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" 
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                
+                {/* Bottom Left: Location */}
+                <div className="absolute bottom-10 left-10 flex items-center gap-2">
+                  <MapPin size={14} className="text-lime" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-white/80">{v.city.toUpperCase()} ROAD</span>
+                </div>
+
+                {/* Bottom Right: Rating */}
+                <div className="absolute bottom-10 right-10 flex items-center gap-1.5 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
+                  <Star size={10} className="text-lime" fill="currentColor" />
+                  <span className="text-[10px] font-black">4.9</span>
+                </div>
+              </div>
+
+              <div className="px-4 space-y-3">
+                <h3 className="text-3xl font-display font-black uppercase italic tracking-tight">{v.name}</h3>
+                <div className="flex items-center gap-6">
+                  <div className="flex items-center gap-2">
+                    <Activity size={14} className="text-lime" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Live Booking</span>
                   </div>
-                  
-                  <div className="space-y-1 px-2">
-                    <h3 className="text-2xl font-display font-bold uppercase group-hover:text-lime transition-colors italic">
-                      {f.name}
-                    </h3>
-                    <div className="flex items-center gap-4 text-slate-400 text-[10px] font-bold uppercase tracking-widest">
-                       <span className="flex items-center gap-1"><Activity size={12} className="text-lime" /> Live Booking</span>
-                       <span className="flex items-center gap-1"><Clock size={12} /> Open Now</span>
-                    </div>
+                  <div className="flex items-center gap-2">
+                    <Clock size={14} className="text-lime" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Open Now</span>
                   </div>
-                </Link>
-              </motion.div>
-            ))
-          )}
+                </div>
+              </div>
+            </Link>
+          ))}
         </div>
       </section>
     </div>

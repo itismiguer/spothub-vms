@@ -93,12 +93,11 @@ export default function Register() {
   };
 
   return (
-    <div className="min-h-screen bg-charcoal flex flex-col items-center justify-center p-6 relative overflow-x-hidden">
+    <div className="min-h-screen bg-transparent flex flex-col items-center justify-center py-12 px-6 relative overflow-x-hidden">
       {/* Dynamic Background */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-0 left-0 w-full h-full bg-charcoal" />
-        <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/20 via-transparent to-transparent opacity-50" />
-        <div className="absolute -top-1/2 -right-1/2 w-full h-full bg-lime/10 rounded-full blur-[160px] animate-pulse" />
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-50" />
+        <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
       </div>
 
       <motion.div 
@@ -226,8 +225,7 @@ export default function Register() {
                         autoCapitalize="none"
                         value={formData.email}
                         onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value.toLowerCase().trim() }))}
-                        style={{ textTransform: 'lowercase' }}
-                        className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-medium normal-case italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/20"
+                        className="w-full glass border-white/10 p-5 pl-14 rounded-3xl text-sm font-medium normal-case italic tracking-widest focus:border-lime/60 transition-all text-white placeholder:text-white/20 placeholder:uppercase"
                       />
                     </div>
                   </div>

@@ -160,9 +160,9 @@ export default function FacilityDetail() {
         const isOwner = user && facilityData.owner_id === user.id;
         const isAdmin = profile?.role === 'ADMIN';
         
-        if (facilityData.status === 'DEACTIVATED' && !isOwner && !isAdmin) {
-          toast.error('Facility Offline', {
-            description: 'The management has temporarily taken this facility offline.'
+        if (facilityData.status !== 'ACTIVE' && !isOwner && !isAdmin) {
+          toast.error('Facility Unavailable', {
+            description: 'The management has temporarily taken this facility offline or it is still under review.'
           });
           navigate('/');
           return;
@@ -170,7 +170,7 @@ export default function FacilityDetail() {
         
         setFacility(facilityData as Facility);
 
-        const { data: courtsData } = await supabase.from('courts').select('*').eq('facility_id', id);
+        const { data: courtsData } = await supabase.from('courts').select('*').eq('facility_id', id).eq('is_active', true).is('deleted_at', null);
         setCourts(courtsData as Court[] || []);
 
         const { data: bookingsData } = await supabase.from('bookings').select('*').eq('facility_id', id);
@@ -478,14 +478,18 @@ export default function FacilityDetail() {
 
   if (loading || !facility) {
     return (
-      <div className="h-screen flex items-center justify-center bg-charcoal">
+      <div className="min-h-screen flex items-center justify-center bg-transparent relative overflow-x-hidden">
+        <div className="fixed inset-0 pointer-events-none">
+          <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-30" />
+          <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
+        </div>
         <motion.div 
           animate={{ 
             scale: [1, 1.2, 1],
             opacity: [0.5, 1, 0.5] 
           }}
           transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-          className="text-lime flex flex-col items-center gap-4"
+          className="text-lime flex flex-col items-center gap-4 relative z-10"
         >
           <Activity size={48} />
           <span className="text-[10px] font-black uppercase tracking-[0.4em] text-white/40">Syncing Facility...</span>
@@ -498,7 +502,11 @@ export default function FacilityDetail() {
   const next7Days = [...Array(7)].map((_, i) => addDays(startOfDay(new Date()), i));
 
   return (
-    <div className="pb-32 bg-charcoal selection:bg-lime/30 min-h-screen">
+    <div className="pb-32 bg-transparent selection:bg-lime/30 min-h-screen relative overflow-x-hidden">
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-30" />
+        <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
+      </div>
       {/* Immersive Header */}
       <section className="relative h-[65vh] overflow-hidden">
         <motion.img 
@@ -508,6 +516,7 @@ export default function FacilityDetail() {
           src={facility.images[0]} 
           className="w-full h-full object-cover" 
           alt={facility.name} 
+          loading="lazy"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
         
@@ -685,7 +694,7 @@ export default function FacilityDetail() {
                       className="flex items-center justify-center gap-2 bg-lime/10 border border-lime/20 px-4 py-2 rounded-full text-[10px] font-black text-lime uppercase tracking-widest hover:bg-lime/20 transition-all relative z-10"
                     >
                       <CalendarIcon size={12} />
-                      Pick A Date
+                      PICK A DATE
                     </div>
                   </div>
                 </div>
@@ -743,7 +752,7 @@ export default function FacilityDetail() {
                     setBookingEnd('');
                   }}
                   label="Court Array Selector"
-                  placeholder="Select Court"
+                  placeholder="SELECT COURT"
                   loading={loading}
                 />
               </div>
@@ -858,7 +867,7 @@ export default function FacilityDetail() {
                         <select 
                           value={bookingEnd}
                           onChange={(e) => setBookingEnd(e.target.value)}
-                          className="w-full glass border-white/10 p-5 rounded-3xl text-sm font-bold focus:border-lime/40 transition-all text-white appearance-none cursor-pointer"
+                          className="w-full text-sm font-bold"
                         >
                           <option value="" className="bg-charcoal text-white">Select end time</option>
                           {[...Array(10)].map((_, i) => {
@@ -944,7 +953,7 @@ export default function FacilityDetail() {
                           const end = new Date(pendingBookingStart);
                           end.setHours(h, m);
                           const diff = (end.getTime() - pendingBookingStart.getTime()) / 60000;
-                          const rate = courts.find(c => c.id === selectedCourt)?.hourlyRate || 0;
+                          const rate = courts.find(c => c.id === selectedCourt)?.hourly_rate || 0;
                           const hours = diff / 60;
                           return `₱${(rate * hours).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                         })() : '---'}
@@ -1160,7 +1169,7 @@ export default function FacilityDetail() {
             >
                <div className="absolute top-0 right-0 p-4 sm:p-8 z-10">
                 <button onClick={() => setIsReporting(false)} className="text-white/20 hover:text-white transition-colors">
-                  <XCircle size={28} sm:size={32} strokeWidth={1.5} />
+                  <XCircle className="size-7 sm:size-8" strokeWidth={1.5} />
                 </button>
               </div>
 
@@ -1176,11 +1185,11 @@ export default function FacilityDetail() {
                 <div className="space-y-6">
                    <div className="space-y-3">
                       <label className="text-[10px] uppercase font-black text-slate-500 tracking-[0.2em] ml-1">Issue Category</label>
-                      <select 
-                        value={reportType}
-                        onChange={(e) => setReportType(e.target.value)}
-                        className="w-full glass border-white/10 p-4 sm:p-5 rounded-3xl text-sm font-bold focus:border-red-500/40 transition-all text-white appearance-none cursor-pointer"
-                      >
+                    <select 
+                      value={reportType}
+                      onChange={(e) => setReportType(e.target.value)}
+                      className="w-full text-sm font-bold"
+                    >
                          {['Maintenance Required', 'Wrong Location', 'Cleanliness', 'Security Issue', 'Other'].map(type => (
                            <option key={type} value={type} className="bg-charcoal text-white">{type}</option>
                          ))}

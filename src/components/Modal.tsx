@@ -32,7 +32,7 @@ export default function Modal({ isOpen, onClose, title, children, maxWidth = '50
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="absolute inset-0 bg-charcoal/80 backdrop-blur-3xl"
+            className="absolute inset-0 bg-black/60 backdrop-blur-3xl"
           />
           
           <motion.div
@@ -41,17 +41,17 @@ export default function Modal({ isOpen, onClose, title, children, maxWidth = '50
             exit={{ scale: 0.95, opacity: 0, y: 20 }}
             transition={{ type: "spring", damping: 30, stiffness: 450 }}
             style={{ maxWidth }}
-            className="relative w-[92%] bg-[#1A1A1A] rounded-[32px] sm:rounded-[48px] border border-white/10 shadow-[0_40px_100px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[80vh] h-auto"
+            className="relative w-[92%] bg-white/[0.03] backdrop-blur-3xl rounded-[32px] sm:rounded-[48px] border border-white/10 shadow-[0_40px_100px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[85vh] sm:max-h-[80vh] h-auto"
           >
             <div className="p-6 sm:p-8 flex items-center justify-between border-b border-white/5 bg-white/[0.02] shrink-0 relative">
-              <h3 className="text-xl sm:text-2xl md:text-3xl font-display font-black uppercase italic tracking-tighter text-[#CCFF00] pr-14 leading-tight whitespace-normal break-words">
+              <h3 className="text-xl sm:text-2xl md:text-3xl font-display font-black uppercase italic tracking-tighter text-[#B5F55A] pr-14 leading-tight whitespace-normal break-words">
                 {title.split(' ').map((word, i) => (
-                   <span key={i} className={i === 0 ? 'text-[#CCFF00]' : 'text-white/60 ml-1.5'}>{word}</span>
+                   <span key={i} className={i === 0 ? 'text-[#B5F55A]' : 'text-white/60 ml-1.5'}>{word}</span>
                 ))}
               </h3>
               <button 
                 onClick={onClose}
-                className="absolute top-4 right-4 sm:top-6 sm:right-6 w-12 h-12 glass rounded-full flex items-center justify-center hover:bg-[#CCFF00] hover:text-black transition-all text-white border border-white/20 hover:border-[#CCFF00] z-50 focus:outline-none"
+                className="absolute top-4 right-4 sm:top-6 sm:right-6 w-12 h-12 glass rounded-full flex items-center justify-center hover:bg-[#B5F55A] hover:text-black transition-all text-white border border-white/20 hover:border-[#B5F55A] z-50 focus:outline-none"
                 id="modal-close-button"
               >
                 <X size={28} className="text-white" />

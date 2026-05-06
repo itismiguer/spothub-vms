@@ -185,8 +185,12 @@ export default function Messages() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-12 py-10">
-      <div className="flex bg-white/5 border border-white/10 rounded-[40px] sm:rounded-[56px] overflow-hidden min-h-[600px] h-auto lg:h-[75vh] glass relative">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-12 py-10 relative overflow-x-hidden">
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-30" />
+        <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
+      </div>
+      <div className="flex bg-white/5 border border-white/10 rounded-[40px] sm:rounded-[56px] overflow-hidden min-h-[600px] h-auto lg:h-[75vh] glass relative z-10">
         
         {/* Chat List */}
         <div className={`w-full lg:w-96 border-r border-white/10 flex flex-col ${activeChat ? 'hidden lg:flex' : 'flex'}`}>
@@ -195,7 +199,7 @@ export default function Messages() {
               <div className="relative">
                 <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" />
                 <input 
-                  placeholder="Filter conversations..." 
+                  placeholder="FILTER CONVERSATIONS..." 
                   className="w-full bg-white/5 border border-white/10 p-4 pl-12 rounded-2xl text-[10px] font-bold uppercase tracking-widest focus:outline-none focus:border-lime/40 transition-all text-white" 
                 />
               </div>
@@ -335,7 +339,7 @@ export default function Messages() {
                      <input 
                        value={newMessage}
                        onChange={(e) => setNewMessage(e.target.value)}
-                       placeholder="Transmission..."
+                       placeholder="TRANSMISSION..."
                        className="flex-1 bg-white/5 border border-white/10 p-4 sm:p-6 rounded-2xl sm:rounded-3xl text-sm font-bold focus:outline-none focus:border-lime/40 transition-all text-white placeholder:text-white/10"
                      />
                      <button

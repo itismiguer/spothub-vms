@@ -1,10 +1,47 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  Calendar, 
+  MapPin, 
+  Clock, 
+  ChevronRight, 
+  Ticket as TicketIcon, 
+  ExternalLink, 
+  AlertCircle, 
+  CheckCircle2, 
+  Smartphone,
+  Navigation,
+  Globe,
+  Loader2,
+  QrCode as QrCodeIcon,
+  X,
+  Trophy,
+  Activity,
+  Plus
+} from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { format, isAfter } from 'date-fns';
-import { Calendar, Clock, MapPin, XCircle, CheckCircle2, Trophy, Star, Plus, Loader2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { formatInTimeZone } from 'date-fns-tz';
+import { QRCodeSVG } from 'qrcode.react';
+import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+
+interface Facility {
+  id: string;
+  name: string;
+  street_address: string;
+  city: string;
+  state_province: string;
+  timezone: string;
+  images: string[];
+}
+
+interface Court {
+  id: string;
+  name: string;
+  sport: string;
+}
 
 interface Booking {
   id: string;
@@ -13,419 +50,341 @@ interface Booking {
   start_time: string;
   end_time: string;
   status: string;
-  facility_name?: string;
-  court_name?: string;
-  has_review?: boolean;
-  expires_at?: string;
-  booking_reference?: string;
-  amount?: number;
+  payment_status: string;
+  booking_reference: string;
+  facilities: Facility;
+  courts: Court;
 }
 
-const CountdownTimer = ({ expiresAt, onExpire }: { expiresAt: string; onExpire: () => void }) => {
-  const [timeLeft, setTimeLeft] = useState<string>('');
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const expiry = new Date(expiresAt);
-      const diff = expiry.getTime() - new Date().getTime();
-
-      if (diff <= 0) {
-        clearInterval(timer);
-        onExpire();
-        return;
-      }
-
-      const minutes = Math.floor(diff / 60000);
-      const seconds = Math.floor((diff % 60000) / 1000);
-      setTimeLeft(`${minutes}:${seconds < 10 ? '0' : ''}${seconds}`);
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [expiresAt, onExpire]);
-
-  return (
-    <div className="flex flex-col items-center justify-center bg-orange-500/10 border border-orange-500/20 px-6 py-4 rounded-3xl group">
-      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-orange-500/60 transition-colors group-hover:text-orange-500">Reserved For</span>
-      <span className="text-3xl font-display font-black italic text-orange-500">{timeLeft}</span>
-    </div>
-  );
-};
-
 export default function MyBookings() {
-  const { user, profile } = useAuth();
-  const [bookings, setBookings] = useState<Booking[]>([]);
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [isCancelling, setIsCancelling] = useState<string | null>(null);
-  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
-  const [reviewingBooking, setReviewingBooking] = useState<Booking | null>(null);
-  const [reviewForm, setReviewForm] = useState({ rating: 5, comment: '' });
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [selectedTicket, setSelectedTicket] = useState<Booking | null>(null);
 
   useEffect(() => {
-    if (!user) return;
-    
-    async function fetchBookings() {
-      try {
-        const { data, error } = await supabase
-          .from('bookings')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('start_time', { ascending: false });
-
-        if (error) throw error;
-        setBookings(data as Booking[]);
-      } catch (error) {
-        console.error("Fetch bookings error:", error);
-      } finally {
-        setLoading(false);
-      }
+    if (user) {
+      fetchBookings();
     }
-
-    fetchBookings();
-
-    const subscription = supabase.channel('my-bookings')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `user_id=eq.${user.id}` }, () => {
-        fetchBookings();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(subscription);
-    };
   }, [user]);
 
-  const handleCancel = async (id: string) => {
-    setIsCancelling(id);
+  const fetchBookings = async () => {
+    setLoading(true);
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('bookings')
-        .update({ status: 'CANCELLED' })
-        .eq('id', id);
-      
+        .select(`
+          *,
+          facilities (
+            id, name, street_address, city, state_province, timezone, images
+          ),
+          courts (
+            id, name, sport
+          )
+        `)
+        .eq('user_id', user?.id)
+        .order('start_time', { ascending: false });
+
       if (error) throw error;
-      toast.info('Booking cancelled successfully.');
-    } catch (error) {
-      toast.error('Failed to cancel booking.');
+      setBookings(data as any[] || []);
+    } catch (err) {
+      console.error('Error fetching bookings:', err);
+      toast.error('Could not retrieve your bookings');
     } finally {
-      setIsCancelling(null);
+      setLoading(false);
     }
   };
 
-  const handleSubmitReview = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !reviewingBooking) return;
-    setIsSubmittingReview(true);
-    try {
-      const { error } = await supabase.from('reviews').insert({
-        user_id: user.id,
-        user_name: profile?.name || 'Player',
-        facility_id: reviewingBooking.facility_id,
-        booking_id: reviewingBooking.id,
-        rating: reviewForm.rating,
-        comment: reviewForm.comment,
-        hidden: false
-      });
-      
-      if (error) throw error;
+  const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-      await supabase.from('bookings').update({ has_review: true }).eq('id', reviewingBooking.id);
-      
-      setReviewingBooking(null);
-      setReviewForm({ rating: 5, comment: '' });
-      toast.success('Your review has been launched!');
-    } catch (error) {
-      toast.error('Failed to submit review.');
-    } finally {
-      setIsSubmittingReview(false);
-    }
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-transparent text-white">
+        <Activity className="text-lime animate-spin mb-4" size={32} />
+        <span className="text-[10px] font-black uppercase tracking-widest text-lime">Synchronizing Wallet...</span>
+      </div>
+    );
+  }
 
-  const [isUploading, setIsUploading] = useState<string | null>(null);
-
-  const handleSetPaid = async (bookingId: string) => {
-    setIsUploading(bookingId);
-    try {
-      const { error } = await supabase
-        .from('bookings')
-        .update({ 
-          status: 'PENDING_PROOF',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', bookingId);
-      
-      if (error) throw error;
-      toast.success('STATUS UPDATED: Please upload your payment screenshot to finalize.');
-    } catch (error) {
-      toast.error('Update failed.');
-    } finally {
-      setIsUploading(null);
-    }
-  };
-
-  const handleUploadProof = async (bookingId: string) => {
-    setIsUploading(bookingId);
-    try {
-      const { error } = await supabase
-        .from('bookings')
-        .update({ 
-          status: 'UNDER_REVIEW',
-          payment_proof_uploaded_at: new Date().toISOString(),
-          payment_receipt_url: 'https://images.unsplash.com/photo-1554224155-16974398755b?q=80&w=3011&auto=format&fit=crop'
-        })
-        .eq('id', bookingId);
-      
-      if (error) throw error;
-      toast.success('PROOF UPLOADED: Your reservation is now under staff review.');
-    } catch (error) {
-      toast.error('Uplink failed. Please retry proof upload.');
-    } finally {
-      setIsUploading(null);
-    }
-  };
-
-  if (loading) return <div className="p-8 text-center animate-pulse text-white/50 font-black italic uppercase tracking-tighter text-3xl">Retrieving your history...</div>;
-
-  const upcoming = bookings.filter(b => 
-    (b.status === 'CONFIRMED' || b.status === 'PENDING' || b.status === 'RESERVED' || b.status === 'PENDING_PROOF' || b.status === 'UNDER_REVIEW') && 
-    isAfter(new Date(b.start_time), new Date())
-  );
-  const past = bookings.filter(b => b.status === 'CANCELLED' || b.status === 'COMPLETED' || (!isAfter(new Date(b.start_time), new Date()) && !['RESERVED', 'PENDING_PROOF', 'UNDER_REVIEW'].includes(b.status)));
+  const upcoming = bookings.filter(b => isAfter(new Date(b.start_time), new Date()));
+  const past = bookings.filter(b => !isAfter(new Date(b.start_time), new Date()));
 
   return (
-    <div className="max-w-6xl mx-auto px-0 sm:px-12 py-12 pb-32 space-y-12">
-      <header className="space-y-1">
-        <h1 className="text-5xl font-display font-black uppercase italic tracking-tighter">Activity <span className="text-white/40">Hub</span></h1>
-        <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">Your competitive journey & court history</p>
-      </header>
+    <div className="min-h-screen bg-transparent pb-20 relative overflow-x-hidden">
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-50" />
+        <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
+      </div>
+      <div className="max-w-4xl mx-auto px-6 py-12 space-y-12 relative z-10">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="space-y-1">
+            <h1 className="text-5xl font-display font-black uppercase italic tracking-tighter text-white">My <span className="text-lime">Bookings</span></h1>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Your Digital Sports Wallet</p>
+          </div>
+          <button 
+            onClick={() => navigate('/search')}
+            className="w-full md:w-auto h-14 bg-lime text-charcoal px-8 rounded-2xl flex items-center justify-center gap-3 font-black uppercase tracking-widest text-[10px] hover:scale-105 active:scale-95 transition-all shadow-xl shadow-lime/20"
+          >
+            <Plus size={18} /> New Reservation
+          </button>
+        </div>
 
-      {/* Stats */}
-      <section className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
-        <div className="bg-lime text-charcoal p-6 sm:p-8 rounded-[32px] sm:rounded-[48px] flex flex-col justify-between min-h-[140px] sm:min-h-[192px] h-auto shadow-[0_0_40px_rgba(181,245,90,0.2)]">
-           <Trophy className="text-charcoal shrink-0" size={28} />
-           <div className="mt-4">
-             <p className="text-3xl sm:text-4xl font-display font-black italic">{bookings.length}</p>
-             <p className="text-[9px] sm:text-[10px] uppercase font-bold tracking-widest text-charcoal/60">Total Sessions</p>
+        {/* Quick Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+           <div className="glass p-6 rounded-[32px] border-white/5 space-y-3">
+              <Trophy className="text-lime" size={20} />
+              <div>
+                <p className="text-2xl font-display font-black italic text-white">{bookings.length}</p>
+                <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Total Games</p>
+              </div>
+           </div>
+           <div className="glass p-6 rounded-[32px] border-white/5 space-y-3 text-lime">
+              <Calendar size={20} />
+              <div>
+                <p className="text-2xl font-display font-black italic text-white">{upcoming.length}</p>
+                <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Upcoming</p>
+              </div>
            </div>
         </div>
-        <div className="glass p-6 sm:p-8 rounded-[32px] sm:rounded-[48px] border-white/5 flex flex-col justify-between min-h-[140px] sm:min-h-[192px] h-auto">
-           <Calendar className="text-white/20 shrink-0" size={28} />
-           <div className="mt-4">
-             <p className="text-3xl sm:text-4xl font-display font-black italic">{upcoming.length}</p>
-             <p className="text-[9px] sm:text-[10px] uppercase font-bold tracking-widest text-white/40">Upcoming</p>
-           </div>
-        </div>
-      </section>
 
-      {/* Lists */}
-      <div className="space-y-12">
-        <section className="space-y-6">
-          <h2 className="text-3xl font-display font-black uppercase italic tracking-tight">Upcoming <span className="text-white/40">Matches</span></h2>
-          <AnimatePresence mode="popLayout">
-            {upcoming.length === 0 ? (
-              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-sm text-slate-500 italic font-medium p-8 glass rounded-[32px] border-white/5">No upcoming matches. Go explore!</motion.p>
-            ) : (
-              <div className="space-y-4">
-                {upcoming.map((booking) => (
-                <motion.div
-                  key={booking.id}
-                  layout="position"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="glass p-6 sm:p-8 rounded-[48px] border-white/5 hover:border-white/10 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-8 group min-h-max h-auto"
-                >
-                    <div className="flex gap-8 items-center">
-                      <div className="w-20 h-20 bg-white/5 rounded-3xl flex flex-col items-center justify-center border border-white/10">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{format(new Date(booking.start_time), 'MMM')}</span>
-                        <span className="text-2xl font-display font-black italic leading-none">{format(new Date(booking.start_time), 'dd')}</span>
+        {/* Bookings Sections */}
+        <div className="space-y-16">
+          {/* Upcoming Section */}
+          <section className="space-y-8">
+            <h2 className="text-2xl font-display font-black uppercase italic tracking-tight text-white/40">Active <span className="text-white">Tickets</span></h2>
+            <div className="grid grid-cols-1 gap-4">
+              {upcoming.map((booking) => {
+                const venueTimeZone = booking.facilities?.timezone || 'UTC';
+                const showUserTime = userTimeZone !== venueTimeZone;
+
+                return (
+                  <motion.div
+                    key={booking.id}
+                    layoutId={booking.id}
+                    onClick={() => setSelectedTicket(booking)}
+                    className="glass p-8 rounded-[40px] border-white/5 group hover:border-lime/40 transition-all cursor-pointer relative overflow-hidden flex flex-col md:flex-row gap-8 justify-between items-start md:items-center"
+                  >
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3">
+                         <div className={`px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest border ${
+                           booking.payment_status === 'paid' 
+                             ? 'bg-lime/10 text-lime border-lime/20' 
+                             : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                         }`}>
+                           {booking.payment_status === 'paid' ? 'Active Ticket' : 'Verifying Payment'}
+                         </div>
                       </div>
+
                       <div className="space-y-1">
-                        <div className="flex items-center gap-3">
-                          <h3 className="font-display font-black text-2xl uppercase italic group-hover:text-lime transition-colors leading-tight">{booking.facility_name}</h3>
-                          {booking.status === 'PENDING' && (
-                            <span className="bg-orange-500/20 text-orange-500 px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest animate-pulse border border-orange-500/20">Awaiting Approval</span>
-                          )}
-                          {booking.status === 'PENDING_PROOF' && (
-                            <span className="bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest animate-pulse border border-blue-500/20">Verifying Proof</span>
-                          )}
-                          {booking.status === 'UNDER_REVIEW' && (
-                            <span className="bg-indigo-500/20 text-indigo-400 px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest border border-indigo-500/20">Staff Reviewing</span>
-                          )}
-                          {booking.status === 'RESERVED' && (
-                            <span className="bg-lime text-charcoal px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest">Locked</span>
-                          )}
+                        <h3 className="text-3xl font-display font-black uppercase italic tracking-tight text-white group-hover:text-lime transition-all">
+                          {booking.facilities?.name}
+                        </h3>
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                           {booking.courts?.name} • {booking.courts?.sport}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-4 pt-2">
+                        <div className="space-y-1 text-white">
+                          <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-slate-500">
+                            <Clock size={12} className="text-lime" /> Venue Local Time
+                          </div>
+                          <p className="text-sm font-black italic">
+                            {formatInTimeZone(new Date(booking.start_time), venueTimeZone, 'EEEE, MMM d')}
+                          </p>
+                          <p className="text-2xl font-display font-black uppercase italic tracking-tighter">
+                            {formatInTimeZone(new Date(booking.start_time), venueTimeZone, 'h:mm aa')}
+                          </p>
                         </div>
-                        <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs font-bold text-slate-400 uppercase tracking-widest">
-                          <span className="flex items-center gap-1"><MapPin size={14} className="text-lime" /> {booking.court_name}</span>
-                          <span className="flex items-center gap-1"><Clock size={14} /> {format(new Date(booking.start_time), 'h:mm a')}</span>
-                          <span className="text-white/40">REF: {booking.booking_reference}</span>
-                        </div>
+
+                        {showUserTime && (
+                           <div className="space-y-1 text-slate-400">
+                             <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-slate-500">
+                               <Globe size={12} /> Your Local Time
+                             </div>
+                             <p className="text-xs font-bold">
+                               {format(new Date(booking.start_time), 'h:mm aa')}
+                             </p>
+                             <p className="text-[9px] font-bold uppercase text-slate-600">{userTimeZone}</p>
+                           </div>
+                        )}
                       </div>
                     </div>
-                    
-                    <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto mt-4 sm:mt-0">
-                      {booking.status === 'RESERVED' && booking.expires_at && (
-                        <div className="flex items-center gap-4 w-full sm:w-auto">
-                          <CountdownTimer 
-                            expiresAt={booking.expires_at} 
-                            onExpire={() => handleCancel(booking.id)} 
-                          />
-                          <button 
-                            onClick={() => handleSetPaid(booking.id)}
-                            disabled={!!isUploading}
-                            className="bg-[#CCFF00] text-charcoal px-8 py-4 rounded-3xl font-black uppercase tracking-widest text-xs hover:scale-105 active:scale-95 transition-all shadow-lg shadow-lime/20 flex items-center justify-center gap-2 w-full sm:w-auto"
-                          >
-                            {isUploading === booking.id ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                            I Have Paid
-                          </button>
-                        </div>
-                      )}
-                      
-                      {booking.status === 'PENDING_PROOF' && (
-                        <button 
-                          onClick={() => handleUploadProof(booking.id)}
-                          disabled={!!isUploading}
-                          className="bg-blue-500 text-white px-8 py-4 rounded-3xl font-black uppercase tracking-widest text-xs hover:scale-105 active:scale-95 transition-all shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 w-full sm:w-auto"
-                        >
-                          {isUploading === booking.id ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-                          Upload Proof
-                        </button>
-                      )}
-                      
-                      <button 
-                        onClick={() => handleCancel(booking.id)}
-                        disabled={!!isCancelling || booking.status === 'CONFIRMED' || booking.status === 'UNDER_REVIEW'}
-                        className="flex items-center gap-2 text-red-500 glass border-red-500/20 hover:bg-red-500/10 px-8 py-3 rounded-2xl transition-all text-xs font-bold w-full sm:w-auto justify-center focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-charcoal disabled:opacity-50 active:scale-95"
-                      >
-                        {isCancelling === booking.id ? <Loader2 size={16} className="animate-spin" /> : <XCircle size={16} />}
-                        Cancel Booking
-                      </button>
+
+                    <div className="flex items-center gap-4 w-full md:w-auto">
+                      <div className="flex-1 md:flex-none glass p-4 rounded-3xl border-white/10 flex items-center justify-center">
+                         <QrCodeIcon size={32} className="text-white/20 group-hover:text-lime transition-colors" />
+                      </div>
+                      <ChevronRight size={24} className="text-slate-700 group-hover:text-lime transition-colors group-hover:translate-x-1" />
                     </div>
                   </motion.div>
-                ))}
-              </div>
-            )}
-          </AnimatePresence>
-        </section>
+                );
+              })}
+              {upcoming.length === 0 && (
+                <div className="p-12 glass rounded-[40px] border-white/5 border-dashed text-center">
+                   <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">No active sessions. Start a new match today.</p>
+                </div>
+              )}
+            </div>
+          </section>
 
-        <section className="space-y-6">
-          <h2 className="text-3xl font-display font-black uppercase italic tracking-tight text-white/20">Archive <span className="text-white/10">History</span></h2>
-          <div className="glass rounded-[48px] overflow-hidden border-white/5">
-             <div className="overflow-x-auto no-scrollbar">
-               <table className="w-full text-left text-sm">
-                 <thead>
-                   <tr className="border-b border-white/5">
-                     <th className="px-10 py-6 text-[10px] uppercase tracking-widest text-slate-500 font-bold">Date</th>
-                     <th className="px-10 py-6 text-[10px] uppercase tracking-widest text-slate-500 font-bold">Location</th>
-                     <th className="px-10 py-6 text-[10px] uppercase tracking-widest text-slate-500 font-bold">Status</th>
-                     <th className="px-10 py-6 text-[10px] uppercase tracking-widest text-slate-500 font-bold text-right">Actions</th>
-                   </tr>
-                 </thead>
-                 <tbody>
-                    {past.map((booking) => (
-                      <tr key={booking.id} className="border-b border-white/5 last:border-0 hover:bg-white/5 transition-colors">
-                        <td className="px-10 py-6 font-display font-black uppercase italic text-slate-300">{format(new Date(booking.start_time), 'MMM dd, yyyy')}</td>
-                        <td className="px-10 py-6 text-slate-400 font-bold uppercase tracking-widest text-[10px]">{booking.facility_name}</td>
-                        <td className="px-10 py-6">
-                          <span className={`flex items-center gap-2 font-bold text-[10px] uppercase tracking-widest ${booking.status === 'CANCELLED' ? 'text-red-400' : booking.status === 'COMPLETED' ? 'text-lime' : 'text-slate-500'}`}>
-                            {booking.status === 'CANCELLED' ? <XCircle size={12} /> : <CheckCircle2 size={12} />}
-                            {booking.status === 'CANCELLED' ? 'Cancelled' : booking.status === 'COMPLETED' ? 'Completed' : 'Past'}
-                          </span>
-                        </td>
-                        <td className="px-10 py-6 text-right">
-                          {booking.status === 'COMPLETED' && !booking.has_review && (
-                            <button 
-                              onClick={() => setReviewingBooking(booking)}
-                              className="bg-lime text-charcoal px-6 py-2 rounded-xl text-[10px] font-black uppercase italic hover:scale-105 transition-transform"
-                            >
-                              Leave Review
-                            </button>
-                          )}
-                          {booking.has_review && (
-                            <span className="text-white/20 text-[10px] uppercase font-bold tracking-widest italic flex items-center justify-end gap-1">
-                              <Star size={10} fill="currentColor" /> Reviewed
-                            </span>
-                          )}
-                        </td>
+          {/* Past Section */}
+          <section className="space-y-8">
+            <h2 className="text-2xl font-display font-black uppercase italic tracking-tight text-white/20">Game <span className="text-white/10">Archive</span></h2>
+            <div className="glass rounded-[48px] border-white/5 overflow-hidden">
+               <div className="overflow-x-auto">
+                 <table className="w-full text-left">
+                   <thead>
+                      <tr className="border-b border-white/5">
+                        <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Date Played</th>
+                        <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Facility / Court</th>
+                        <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500">Status</th>
+                        <th className="p-8 text-[10px] font-black uppercase tracking-widest text-slate-500 text-right">Reference</th>
                       </tr>
-                    ))}
-                    {past.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="px-10 py-12 text-center text-slate-500 italic font-medium">No past history yet.</td>
-                      </tr>
-                    )}
-                 </tbody>
-               </table>
-             </div>
-          </div>
-        </section>
+                   </thead>
+                   <tbody className="divide-y divide-white/5">
+                      {past.map((b) => (
+                        <tr key={b.id} className="group hover:bg-white/[0.02] transition-colors cursor-pointer" onClick={() => setSelectedTicket(b)}>
+                           <td className="p-8 text-xs font-black uppercase text-slate-300">
+                              {format(new Date(b.start_time), 'MMM dd, yyyy')}
+                           </td>
+                           <td className="p-8">
+                              <div className="text-xs font-black uppercase text-white">{b.facilities?.name}</div>
+                              <div className="text-[9px] text-slate-500 uppercase font-bold">{b.courts?.name}</div>
+                           </td>
+                           <td className="p-8">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle2 size={12} className={b.status === 'CANCELLED' ? 'text-red-500' : 'text-slate-500'} />
+                                <span className={`text-[9px] font-black uppercase tracking-widest ${b.status === 'CANCELLED' ? 'text-red-500' : 'text-slate-500'}`}>
+                                  {b.status}
+                                </span>
+                              </div>
+                           </td>
+                           <td className="p-8 text-right font-mono text-[10px] text-slate-600">
+                             #{b.booking_reference}
+                           </td>
+                        </tr>
+                      ))}
+                   </tbody>
+                 </table>
+               </div>
+            </div>
+          </section>
+        </div>
       </div>
 
-      {/* Review Modal */}
+      {/* Digital Ticket Modal */}
       <AnimatePresence>
-        {reviewingBooking && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 sm:p-12">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setReviewingBooking(null)}
-              className="absolute inset-0 bg-charcoal/80 backdrop-blur-xl"
+        {selectedTicket && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-8">
+            <div className="absolute inset-0 bg-black/80 backdrop-blur-3xl"
+              onClick={() => setSelectedTicket(null)}
             />
+            
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              initial={{ opacity: 0, scale: 0.9, y: 40 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-[95%] max-w-lg glass border-white/10 rounded-[32px] sm:rounded-[48px] p-6 sm:p-10 overflow-y-auto no-scrollbar max-h-[85vh] h-auto shadow-2xl m-4 sm:m-8"
+              exit={{ opacity: 0, scale: 0.9, y: 40 }}
+              className="relative w-full max-w-lg bg-white rounded-[48px] overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,0.5)] text-charcoal"
+              onClick={(e) => e.stopPropagation()}
             >
-              <div className="absolute top-0 right-0 p-4 sm:p-8 z-10">
-                <button onClick={() => setReviewingBooking(null)} className="text-[#CCFF00] hover:scale-110 transition-transform">
-                  <XCircle size={32} strokeWidth={2} />
-                </button>
+              <div className="p-10 space-y-8">
+                <div className="flex justify-between items-start">
+                   <div className="space-y-1">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Entry Ticket</p>
+                      <h2 className="text-4xl font-display font-black uppercase italic tracking-tighter leading-none">{selectedTicket.facilities?.name}</h2>
+                   </div>
+                   <button 
+                    onClick={() => setSelectedTicket(null)}
+                    className="w-12 h-12 bg-charcoal/5 rounded-2xl flex items-center justify-center hover:bg-charcoal/10 transition-colors"
+                   >
+                      <X className="text-charcoal" size={24} />
+                   </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-8 pt-4">
+                   <div className="space-y-1">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Court / Field</p>
+                      <p className="text-base font-black uppercase italic">{selectedTicket.courts?.name}</p>
+                   </div>
+                   <div className="space-y-1">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Booking Reference</p>
+                      <p className="text-base font-black uppercase italic text-lime-600">#{selectedTicket.booking_reference}</p>
+                   </div>
+                </div>
+
+                <div className="p-8 bg-charcoal/5 rounded-[32px] space-y-6">
+                   <div className="flex items-center gap-5">
+                      <Calendar size={20} className="text-slate-400" />
+                      <div>
+                         <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Date & Venue Time</p>
+                         <p className="text-sm font-black uppercase italic">
+                            {formatInTimeZone(new Date(selectedTicket.start_time), selectedTicket.facilities?.timezone || 'UTC', 'EEEE, MMM d @ h:mm aa')}
+                         </p>
+                      </div>
+                   </div>
+                   <div className="flex items-start gap-5">
+                      <MapPin size={20} className="text-slate-400 mt-1" />
+                      <div className="space-y-1">
+                         <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Structured Address</p>
+                         <p className="text-xs font-bold leading-tight">
+                            {selectedTicket.facilities?.street_address}<br/>
+                            {selectedTicket.facilities?.city}, {selectedTicket.facilities?.state_province}
+                         </p>
+                      </div>
+                   </div>
+                </div>
+
+                {/* Status Alert */}
+                {selectedTicket.payment_status === 'pending' && (
+                   <div className="p-6 bg-amber-50 rounded-3xl border border-amber-100 flex items-start gap-4">
+                      <AlertCircle className="text-amber-500 flex-shrink-0" size={18} />
+                      <div className="space-y-1">
+                         <p className="text-[10px] font-black uppercase tracking-widest text-amber-900">Payment Verification</p>
+                         <p className="text-[10px] font-medium text-amber-800 leading-normal">Our team is verifying your payment. Your ticket will be active shortly.</p>
+                      </div>
+                   </div>
+                )}
               </div>
 
-              <div className="space-y-8">
-                <header className="pr-12 sm:pr-0">
-                  <div className="bg-lime/20 text-lime w-fit px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest mb-4">Post-Match Feedback</div>
-                  <h2 className="text-3xl sm:text-4xl font-display font-black uppercase italic tracking-tighter leading-none whitespace-normal break-words">{reviewingBooking.facility_name}</h2>
-                  <p className="text-slate-400 text-[10px] sm:text-xs font-bold uppercase tracking-widest mt-2">{reviewingBooking.court_name} • {format(new Date(reviewingBooking.start_time), 'MMM dd')}</p>
-                </header>
+              {/* Perforation Line */}
+              <div className="relative flex items-center px-10">
+                 <div className="absolute -left-6 w-12 h-12 bg-[#0A0A0A] rounded-full" />
+                 <div className="absolute -right-6 w-12 h-12 bg-[#0A0A0A] rounded-full" />
+                 <div className="w-full border-t-2 border-dashed border-charcoal/10" />
+              </div>
 
-                <form onSubmit={handleSubmitReview} className="space-y-8">
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Overall Rating</label>
-                    <div className="flex flex-wrap gap-3">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <button
-                          key={star}
-                          type="button"
-                          onClick={() => setReviewForm(prev => ({ ...prev, rating: star }))}
-                          className={`p-3 rounded-2xl transition-all ${reviewForm.rating >= star ? 'bg-lime text-charcoal scale-110 shadow-[0_0_20px_rgba(181,245,90,0.3)]' : 'bg-white/5 text-white/20 hover:bg-white/10'}`}
-                        >
-                          <Star size={20} className="sm:size-6" fill={reviewForm.rating >= star ? "currentColor" : "none"} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Your Comment</label>
-                    <textarea
-                      required
-                      placeholder="How was the lighting? The court surface? The overall vibe?"
-                      className="w-full h-32 bg-white/5 border border-white/10 rounded-3xl p-5 sm:p-6 text-[13px] sm:text-sm text-white placeholder:text-white/10 focus:outline-none focus:border-lime transition-colors resize-none leading-relaxed"
-                      value={reviewForm.comment}
-                      onChange={(e) => setReviewForm(prev => ({ ...prev, comment: e.target.value }))}
+              {/* Ticket Bottom (QR Code) */}
+              <div className="p-10 flex flex-col items-center gap-8 bg-slate-50/50">
+                 <div className={`p-6 bg-white rounded-4xl border-2 transition-all ${selectedTicket.payment_status === 'paid' ? 'border-lime' : 'border-slate-100'}`}>
+                    <QRCodeSVG 
+                      value={selectedTicket.id}
+                      size={200}
+                      level="H"
+                      includeMargin={false}
+                      className={selectedTicket.payment_status === 'paid' ? 'opacity-100' : 'opacity-10 grayscale'}
                     />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={isSubmittingReview}
-                    className="w-full bg-lime text-charcoal py-5 sm:py-6 rounded-3xl font-display font-black uppercase italic tracking-tighter text-lg sm:text-xl hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-lime/20 flex items-center justify-center gap-3 disabled:opacity-50"
-                  >
-                    {isSubmittingReview ? <Loader2 size={24} className="animate-spin" /> : <>Post Review <Plus size={20} /></>}
-                  </button>
-                </form>
+                 </div>
+                 
+                 <div className="w-full flex flex-col gap-3">
+                    <a 
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedTicket.facilities?.street_address + ', ' + selectedTicket.facilities?.city)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full h-16 bg-charcoal text-white rounded-2xl flex items-center justify-center gap-3 font-black uppercase tracking-widest text-[10px] hover:scale-[1.02] active:scale-[0.98] transition-all"
+                    >
+                       <Navigation size={18} className="text-lime" />
+                       Open in Google Maps
+                    </a>
+                    <button 
+                      onClick={() => setSelectedTicket(null)}
+                      className="w-full h-14 border border-charcoal/5 rounded-2xl flex items-center justify-center font-black uppercase tracking-widest text-[10px] text-slate-400 hover:text-charcoal transition-colors"
+                    >
+                       Close Pocket
+                    </button>
+                 </div>
               </div>
             </motion.div>
           </div>

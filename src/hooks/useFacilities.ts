@@ -16,7 +16,7 @@ export function useFacilities(userId: string | undefined) {
 
     const fetchFacilities = async () => {
       const { data, error: fetchError } = await supabase
-        .from('facilities')
+        .from('venues')
         .select('*')
         .eq('owner_id', userId);
 
@@ -31,9 +31,9 @@ export function useFacilities(userId: string | undefined) {
     fetchFacilities();
 
     const channel = supabase
-      .channel(`facilities-${userId}`)
+      .channel(`venues-${userId}`)
       .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'facilities', filter: `owner_id=eq.${userId}` }, 
+        { event: '*', schema: 'public', table: 'venues', filter: `owner_id=eq.${userId}` }, 
         (payload) => {
           if (payload.eventType === 'INSERT') {
             setFacilities(prev => [...prev, payload.new as Facility]);

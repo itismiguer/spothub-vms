@@ -1,6 +1,6 @@
 {
   "name": "SPOTHUB",
   "description": "Premium sports venue booking platform with tiered access for players, court owners, and admins.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["multi-tenant", "booking", "supabase-auth", "postgresql"]
 }

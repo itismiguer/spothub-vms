@@ -40,6 +40,46 @@ async function startServer() {
     res.json({ status: "ok", notifications: !!resend && !!twilioClient });
   });
 
+  app.get("/sitemap.xml", async (req, res) => {
+    try {
+      const { data: venues } = await supabase
+        .from('facilities')
+        .select('slug, city, country_code')
+        .eq('status', 'LIVE');
+      
+      const cityPages = Array.from(new Set(venues?.map(v => 
+        v.country_code && v.city ? `${v.country_code.toLowerCase()}/${v.city.toLowerCase()}` : null
+      ).filter(Boolean) || []));
+      
+      const venuePages = venues?.map(v => 
+        v.country_code && v.city && v.slug ? `${v.country_code.toLowerCase()}/${v.city.toLowerCase()}/${v.slug}` : null
+      ).filter(Boolean) || [];
+      
+      // Use deployment URL if available, fallback to localhost for dev
+      const baseUrl = process.env.BASE_URL || "https://ais-dev-a66cyx5eupuuojqhntxjqe-509286172976.asia-east1.run.app";
+
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>${baseUrl}/</loc><priority>1.0</priority></url>
+  <url><loc>${baseUrl}/search</loc><priority>0.8</priority></url>`;
+
+      cityPages.forEach(path => {
+        xml += `\n  <url><loc>${baseUrl}/${path}</loc><priority>0.7</priority></url>`;
+      });
+
+      venuePages.forEach(path => {
+        xml += `\n  <url><loc>${baseUrl}/${path}</loc><priority>0.9</priority></url>`;
+      });
+
+      xml += '\n</urlset>';
+      
+      res.header('Content-Type', 'application/xml');
+      res.send(xml);
+    } catch (err) {
+      res.status(500).send('Error generating sitemap');
+    }
+  });
+
   // Automated Notification System Triggers (Supabase Realtime)
   
   // 1. Booking Triggers

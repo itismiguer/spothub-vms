@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Activity } from 'lucide-react';
+import LiveMonitor from '../LiveMonitor';
 
 interface LiveFeedTabProps {
   selectedFacilityId: string | null;
@@ -25,11 +26,8 @@ export const LiveFeedTab: React.FC<LiveFeedTabProps> = ({ selectedFacilityId }) 
           Launch Dedicated Monitor
         </button>
       </div>
-      <div className="glass rounded-[56px] border-white/5 h-[600px] overflow-hidden">
-        <iframe 
-          src={`/facility-hub/live-monitor?facilityId=${selectedFacilityId}`} 
-          className="w-full h-full border-none grayscale contrast-125 brightness-75 hover:grayscale-0 transition-all duration-1000" 
-        />
+      <div className="glass rounded-[56px] border-white/5 h-[800px] overflow-hidden p-8">
+        <LiveMonitor propFacilityId={selectedFacilityId || undefined} isEmbedded={true} />
       </div>
     </div>
   );

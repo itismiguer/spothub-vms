@@ -100,8 +100,12 @@ export default function AdminVerify() {
   };
 
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-charcoal">
-       <div className="animate-pulse flex flex-col items-center gap-4">
+    <div className="min-h-screen flex items-center justify-center bg-transparent relative">
+       <div className="fixed inset-0 pointer-events-none">
+         <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-50" />
+         <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
+       </div>
+       <div className="animate-pulse flex flex-col items-center gap-4 relative z-10">
           <Shield size={48} className="text-lime/20" />
           <p className="text-[10px] font-black uppercase text-white/40 tracking-[0.3em]">Opening Security Portal...</p>
        </div>
@@ -109,7 +113,13 @@ export default function AdminVerify() {
   );
 
   return (
-    <div className="max-w-6xl mx-auto px-0 sm:px-12 py-12 pb-32 space-y-12">
+    <div className="min-h-screen bg-transparent relative overflow-x-hidden">
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-lime/10 via-transparent to-transparent opacity-50" />
+        <div className="absolute -top-1/4 -right-1/4 w-[60%] h-[60%] bg-lime/10 rounded-full blur-[140px] animate-pulse" />
+      </div>
+
+      <div className="max-w-6xl mx-auto px-6 sm:px-12 py-12 pb-32 space-y-12 relative z-10">
       <header className="flex flex-col sm:flex-row items-center justify-between gap-8">
         <div className="flex items-center gap-6">
            <button 
@@ -227,5 +237,6 @@ export default function AdminVerify() {
         )}
       </div>
     </div>
+  </div>
   );
 }

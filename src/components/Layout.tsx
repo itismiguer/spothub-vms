@@ -113,51 +113,81 @@ export default function Layout() {
   }, []);
 
   const navItems = [
-    { label: 'Home', path: '/', icon: Search, roles: ['GUEST', 'PLAYER', 'OWNER', 'ADMIN'] },
+    { label: 'Home', path: '/', icon: Search, roles: ['GUEST', 'PLAYER', 'OWNER', 'STAFF', 'ADMIN'] },
+    { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['PLAYER', 'ADMIN'] },
     { label: 'Bookings', path: '/my-bookings', icon: Calendar, roles: ['PLAYER', 'ADMIN'] },
-    { label: 'Schedule', path: '/owner?tab=schedule', icon: Activity, roles: ['OWNER', 'ADMIN'] },
+    { label: 'Schedule', path: '/owner?tab=schedule', icon: Activity, roles: ['OWNER', 'STAFF', 'ADMIN'] },
     { label: 'Earnings', path: '/owner?tab=earnings', icon: ShieldAlert, roles: ['OWNER'] },
-    { label: 'Messages', path: '/messages', icon: MessageSquare, roles: ['PLAYER', 'OWNER', 'ADMIN'] },
-    { label: 'Manage', path: '/owner', icon: LayoutDashboard, roles: ['OWNER', 'ADMIN'] },
+    { label: 'Messages', path: '/messages', icon: MessageSquare, roles: ['PLAYER', 'OWNER', 'STAFF', 'ADMIN'] },
+    { label: 'Manage', path: '/owner', icon: LayoutDashboard, roles: ['OWNER', 'STAFF', 'ADMIN'] },
     { label: 'Admin', path: '/admin', icon: Settings, roles: ['ADMIN'] },
-    { label: 'Profile', path: '/profile', icon: User, roles: ['PLAYER', 'OWNER', 'ADMIN'] },
+    { label: 'Profile', path: '/profile', icon: User, roles: ['PLAYER', 'OWNER', 'STAFF', 'ADMIN'] },
   ];
 
   const filteredNav = navItems.filter((item) => {
+    // 1. Unauthenticated users (Guests)
     if (!user) return item.roles.includes('GUEST');
-    // Hide 'Manage' for Players
-    if (profile?.role === 'PLAYER' && (item.path === '/owner' || item.path === '/owner?tab=schedule' || item.path === '/owner?tab=earnings')) return false;
-    // Hide 'Bookings' for Owners as requested (Home, Messages, Manage, Profile)
-    if (profile?.role === 'OWNER' && item.path === '/my-bookings') return false;
-    return profile ? item.roles.includes(profile.role) : item.roles.includes('PLAYER');
+    
+    // 2. Identify the user
+    const role = (profile?.role || 'PLAYER').toUpperCase().trim();
+    const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN' || user.email === 'miguel@builtbymiguel.net';
+    
+    // 3. Logic-based filtering
+    
+    // Always show these for any authenticated user
+    if (['Home', 'Profile', 'Messages'].includes(item.label)) return true;
+    
+    // Role-specific visibility
+    if (role === 'PLAYER') {
+      return ['Bookings', 'Dashboard'].includes(item.label);
+    }
+    
+    if (role === 'OWNER' || role === 'STAFF') {
+      if (['Schedule', 'Manage'].includes(item.label)) return true;
+      if (item.label === 'Earnings' && role === 'OWNER') return true;
+    }
+
+    // Admin & Super Admin see everything else that has ADMIN role
+    if (isAdmin && item.roles.includes('ADMIN')) return true;
+
+    return false;
   });
 
-  const isAuthPage = location.pathname === '/register' || location.pathname === '/login';
+  const isAuthPage = 
+    location.pathname === '/register' || 
+    location.pathname === '/login' || 
+    location.pathname === '/complete-profile' ||
+    location.pathname.startsWith('/onboarding') ||
+    location.pathname.startsWith('/manage/venues');
 
   const isManagementPage =
     location.pathname.startsWith('/owner') ||
     location.pathname.startsWith('/manage') ||
     location.pathname.startsWith('/admin') ||
     location.pathname.startsWith('/management') ||
+    location.pathname.startsWith('/onboarding') ||
     location.pathname.startsWith('/facility-hub/live-monitor');
 
   return (
-    <div className="min-h-screen relative bg-[#0A0A0A] selection:bg-[#CCFF00]/30 selection:text-white font-sans antialiased">
+    <div className="min-h-screen relative bg-[#0A0A0A] selection:bg-[#B5F55A]/30 selection:text-white font-sans antialiased overflow-x-hidden">
       {/* Dynamic Background Accents */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
-        <div className="absolute -top-1/4 -right-1/4 w-1/2 h-1/2 bg-[#CCFF00]/5 rounded-full blur-[120px] animate-pulse" />
-        <div className="absolute -bottom-1/4 -left-1/4 w-1/2 h-1/2 bg-[#CCFF00]/3 rounded-full blur-[100px]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808008_1px,transparent_1px),linear-gradient(to_bottom,#80808008_1px,transparent_1px)] bg-[size:64px_64px]" />
+        <div className="absolute top-[-10%] right-[-10%] w-[60%] h-[60%] bg-[#B5F55A]/[0.05] rounded-full blur-[140px] animate-pulse" />
+        <div className="absolute bottom-[-10%] left-[-10%] w-[50%] h-[50%] bg-[#B5F55A]/[0.03] rounded-full blur-[120px]" />
       </div>
+
+      <div className="relative z-10">
 
       {!isAuthPage && (
         <nav className="fixed top-0 inset-x-0 h-20 glass z-[1000] flex flex-col justify-center backdrop-blur-3xl border-b border-white/5">
           <div className="w-full max-w-[1440px] mx-auto flex items-center justify-between px-2 sm:px-6 md:px-12 gap-2 sm:gap-6">
             <div className="flex items-center gap-2 flex-shrink-0 min-w-0">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-[#CCFF00] rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(204,255,0,0.4)] flex-shrink-0">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-[#B5F55A] rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(181,245,90,0.4)] flex-shrink-0">
                 <Activity className="text-black fill-black" size={20} />
               </div>
               <span className="hidden xs:block sm:block text-sm sm:text-lg lg:text-xl font-display font-black tracking-tighter uppercase italic text-white whitespace-nowrap">
-                SPOT<span className="text-[#CCFF00]">HUB</span>
+                SPOT<span className="text-[#B5F55A]">HUB</span>
               </span>
             </div>
 
@@ -171,51 +201,62 @@ export default function Layout() {
                 }))}
                 selectedId={location.pathname}
                 onSelect={(id) => navigate(id)}
-                placeholder="Navigate"
+                placeholder="NAVIGATE"
                 variant="compact"
               />
             </div>
 
             <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
-              {user && !user.emailVerified && user.providerData?.[0]?.providerId === 'password' && (
+              {user && !user.email_confirmed_at && user.app_metadata?.provider === 'email' && (
                 <div className="hidden lg:flex items-center gap-2 px-4 py-1.5 bg-red-500/10 border border-red-500/20 rounded-full animate-pulse">
                   <ShieldAlert size={12} className="text-red-400" />
                   <span className="text-[9px] font-black text-red-100 uppercase tracking-widest whitespace-nowrap">Verification Required</span>
                 </div>
               )}
               {user && (
-                <button 
-                  onClick={() => setIsNotificationDrawerOpen(true)}
-                  className="w-10 h-10 glass rounded-xl flex items-center justify-center hover:bg-white/10 transition-all text-slate-400 hover:text-[#CCFF00] border border-white/10 relative"
-                >
-                  <Bell size={20} />
-                  {hasUnreadNotifications && (
-                    <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-[#CCFF00] rounded-full shadow-[0_0_10px_rgba(204,255,0,0.8)] animate-pulse" />
-                  )}
-                </button>
+                <>
+                  <button 
+                    onClick={logout}
+                    className="w-10 h-10 glass rounded-xl flex items-center justify-center hover:bg-white/10 transition-all text-slate-400 hover:text-red-500 border border-white/10"
+                    title="Sign Out"
+                  >
+                    <LogOut size={20} />
+                  </button>
+                  <button 
+                    onClick={() => setIsNotificationDrawerOpen(true)}
+                    className="w-10 h-10 glass rounded-xl flex items-center justify-center hover:bg-white/10 transition-all text-slate-400 hover:text-[#B5F55A] border border-white/10 relative"
+                  >
+                    <Bell size={20} />
+                    {hasUnreadNotifications && (
+                      <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-[#B5F55A] rounded-full shadow-[0_0_10px_rgba(181,245,90,0.8)] animate-pulse" />
+                    )}
+                  </button>
+                </>
               )}
               {user ? (
                 <div className="hidden xs:flex items-center gap-3 bg-white/5 backdrop-blur-md px-3 sm:px-4 py-2 rounded-full border border-white/10">
                   <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 hidden sm:inline">{profile?.role}</span>
-                  <div className="w-7 h-7 bg-[#CCFF00] rounded-full flex items-center justify-center text-charcoal text-[11px] font-black italic">
+                  <div className="w-7 h-7 bg-[#B5F55A] rounded-full flex items-center justify-center text-charcoal text-[11px] font-black italic shadow-[0_0_15px_rgba(181,245,90,0.3)]">
                     {profile?.name ? profile.name[0] : 'U'}
                   </div>
                 </div>
               ) : (
-                <button 
-                  onClick={() => navigate('/login')}
-                  className="bg-[#CCFF00] text-black px-5 sm:px-8 py-2.5 rounded-full font-black uppercase tracking-widest text-[9px] sm:text-[10px] hover:scale-105 active:scale-95 transition-all shadow-xl shadow-[#CCFF00]/20"
-                >
-                  Sign In
-                </button>
+                <div className="flex items-center gap-2 sm:gap-4">
+                  <Link 
+                    to="/login"
+                    className="bg-[#B5F55A] text-black px-5 sm:px-8 py-2.5 rounded-full font-black uppercase tracking-widest text-[9px] sm:text-[10px] hover:scale-105 active:scale-95 transition-all shadow-xl shadow-[#B5F55A]/20 flex items-center justify-center"
+                  >
+                    Sign In
+                  </Link>
+                </div>
               )}
             </div>
           </div>
         </nav>
       )}
 
-      <main className={`relative ${isAuthPage ? 'pt-0' : 'pt-24'} pb-32 min-h-screen`}>
-        <div className={`w-full max-w-[1440px] mx-auto ${isAuthPage ? '' : 'px-4 sm:px-8 md:px-12'}`}>
+      <main className={`relative ${isAuthPage ? 'pt-0 pb-0' : 'pt-24 pb-32'} min-h-screen`}>
+        <div className={`w-full ${isAuthPage ? 'h-full' : 'max-w-[1440px] mx-auto px-4 sm:px-8 md:px-12'}`}>
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}
@@ -224,6 +265,31 @@ export default function Layout() {
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.3 }}
             >
+              {!isAuthPage && !['/', '/dashboard', '/owner', '/admin', '/login', '/register', '/complete-profile'].includes(location.pathname) && (
+                <div className="mb-8 flex items-center justify-between">
+                  <button
+                    onClick={() => {
+                      if (window.history.length > 2) {
+                        navigate(-1);
+                      } else {
+                        navigate('/owner');
+                      }
+                    }}
+                    className="flex items-center gap-2 text-lime hover:gap-4 transition-all group"
+                  >
+                    <div className="w-8 h-8 rounded-full border border-lime/30 flex items-center justify-center group-hover:border-lime transition-all">
+                      <ChevronDown className="rotate-90" size={16} />
+                    </div>
+                    <span className="text-[10px] font-black uppercase tracking-[0.2em]">← Back to Operations</span>
+                  </button>
+
+                  <div className="hidden sm:flex items-center gap-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-white/5 px-6 py-2 rounded-full border border-white/5">
+                    <span className="text-lime/40">Secure Tunnel</span>
+                    <div className="w-1.5 h-1.5 rounded-full bg-lime animate-pulse" />
+                    <span>{location.pathname}</span>
+                  </div>
+                </div>
+              )}
               <Outlet />
             </motion.div>
           </AnimatePresence>
@@ -236,17 +302,26 @@ export default function Layout() {
       />
 
       {/* Floating Navigator - Fixed to viewport with safe area awareness */}
-      {!isAuthPage && (
+      {user && !isAuthPage && (
         <div
-          className={`fixed bottom-0 inset-x-0 z-40 hidden md:flex justify-center px-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] transition-all duration-500 pointer-events-none ${
+          className={`fixed bottom-4 inset-x-0 z-[5000] flex justify-center px-4 sm:px-6 pb-[env(safe-area-inset-bottom)] transition-all duration-500 pointer-events-none ${
             isModalOpen ? 'translate-y-32 opacity-0' : 'translate-y-0 opacity-100'
-          } ${location.pathname.includes('facility-hub') ? 'lg:flex hidden' : ''}`}
+          }`}
         >
-        <div className={`glass px-1 sm:px-2 py-2 rounded-[32px] flex items-center justify-around shadow-[0_20px_50px_rgba(0,0,0,0.5)] h-20 w-full max-w-[520px] transition-all duration-300 border-white/10 overflow-hidden ${
+        <div className={`glass px-1 sm:px-2 py-2 rounded-[32px] flex items-center justify-around shadow-[0_20px_50px_rgba(0,0,0,0.5)] h-20 w-full max-w-[520px] transition-all duration-300 border-white/10 overflow-hidden pointer-events-auto ${
           isModalOpen ? 'pointer-events-none' : 'pointer-events-auto'
         }`}>
           {filteredNav.map((item) => {
-            const isActive = location.pathname === item.path;
+            const itemBasePath = item.path.split('?')[0];
+            const itemSearch = item.path.split('?')[1] || '';
+            
+            // Refined active logic:
+            // 1. If item has search params (tab), it must match both path and search
+            // 2. If item is base path (Manage), it matches if path is correct and no active tab search matches other items
+            const isActive = itemSearch 
+              ? location.pathname === itemBasePath && location.search.includes(itemSearch)
+              : location.pathname === itemBasePath && (!location.search || !['tab=schedule', 'tab=earnings'].some(s => location.search.includes(s)));
+            
             const Icon = item.icon;
             
             return (
@@ -254,13 +329,13 @@ export default function Layout() {
                 key={item.path}
                 to={item.path}
                 className={`flex-1 flex flex-col items-center justify-center gap-1 relative h-full transition-all duration-300 rounded-2xl group focus:outline-none min-w-0 ${
-                  isActive ? 'text-charcoal' : 'text-slate-500 hover:text-white'
+                  isActive ? 'text-black' : 'text-white/60 hover:text-white'
                 }`}
               >
                 {isActive && (
                   <motion.div 
                     layoutId="navIndicator"
-                    className="absolute inset-0 bg-[#CCFF00] rounded-2xl border border-[#CCFF00]/40 shadow-[0_10px_30px_rgba(204,255,0,0.4)]"
+                    className="absolute inset-0 bg-lime rounded-2xl border border-lime/40 shadow-[0_10px_30px_rgba(181,245,90,0.4)]"
                     transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                   />
                 )}
@@ -274,7 +349,7 @@ export default function Layout() {
                       <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-charcoal shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
                     )}
                   </div>
-              <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-[0.1em] sm:tracking-[0.15em] bg-transparent leading-none flex-shrink-0 whitespace-nowrap px-1 ${isActive ? 'text-charcoal' : 'text-slate-500 group-hover:text-white'}`}>
+              <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-[0.1em] sm:tracking-[0.15em] bg-transparent leading-none flex-shrink-0 whitespace-nowrap px-1 ${isActive ? 'text-black' : 'text-white/60 group-hover:text-white'}`}>
                 {item.label}
               </span>
                 </div>
@@ -284,6 +359,7 @@ export default function Layout() {
         </div>
       </div>
       )}
+      </div>
     </div>
   );
 }

@@ -17,6 +17,11 @@ interface SelectorProps {
   loading?: boolean;
   className?: string;
   variant?: 'default' | 'compact';
+  footerAction?: {
+    label: string;
+    onClick: () => void;
+    icon?: React.ElementType;
+  };
 }
 
 export default function Selector({ 
@@ -27,7 +32,8 @@ export default function Selector({
   placeholder = 'Select an option', 
   loading = false,
   className = '',
-  variant = 'default'
+  variant = 'default',
+  footerAction
 }: SelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -65,7 +71,7 @@ export default function Selector({
       
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-full min-h-[52px] h-auto flex items-center gap-4 px-6 py-3 glass border border-white/10 rounded-2xl transition-all duration-300 group hover:border-lime/40 focus:outline-none focus:ring-2 focus:ring-lime/20 ${isOpen ? 'border-lime/40 ring-2 ring-lime/20' : ''}`}
+        className={`w-full h-12 flex items-center gap-4 px-6 glass border border-white/10 rounded-2xl transition-all duration-300 group hover:border-lime/40 focus:outline-none focus:ring-2 focus:ring-lime/20 ${isOpen ? 'border-lime/40 ring-2 ring-lime/20' : ''}`}
       >
         <div className="flex-shrink-0 w-4 font-bold flex items-center justify-center">
           {Icon ? <Icon size={16} className="text-lime" /> : <div className="w-1.5 h-1.5 rounded-full bg-lime" />}
@@ -121,6 +127,25 @@ export default function Selector({
                 );
               })}
             </div>
+
+            {footerAction && (
+              <div className="border-t border-white/10 p-1">
+                <button
+                  onClick={() => {
+                    footerAction.onClick();
+                    setIsOpen(false);
+                  }}
+                  className="w-full h-[60px] flex items-center gap-4 px-6 hover:bg-lime/10 text-lime rounded-2xl transition-all group"
+                >
+                  <div className="flex-shrink-0 w-4 flex items-center justify-center">
+                    {footerAction.icon ? <footerAction.icon size={16} /> : <div className="w-1.5 h-1.5 rounded-full bg-lime" />}
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-left flex-1">
+                    {footerAction.label}
+                  </span>
+                </button>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

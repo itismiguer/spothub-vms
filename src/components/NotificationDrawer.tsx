@@ -85,7 +85,7 @@ export default function NotificationDrawer({ isOpen, onClose }: NotificationDraw
 
   const getIcon = (type: string) => {
     switch (type) {
-      case 'booking_confirmed': return <CheckCircle2 className="text-[#CCFF00]" size={16} />;
+      case 'booking_confirmed': return <CheckCircle2 className="text-[#B5F55A]" size={16} />;
       case 'booking_expired': return <AlertCircle className="text-red-400" size={16} />;
       case 'proof_uploaded': return <FileText className="text-blue-400" size={16} />;
       case 'new_booking': return <Bell className="text-cyan" size={16} />;
@@ -113,12 +113,12 @@ export default function NotificationDrawer({ isOpen, onClose }: NotificationDraw
           >
             <div className="p-8 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
               <div>
-                <h3 className="text-2xl font-display font-black uppercase italic tracking-tighter text-[#CCFF00]">Intelligence <span className="text-white/60">Feed</span></h3>
+                <h3 className="text-2xl font-display font-black uppercase italic tracking-tighter text-[#B5F55A]">Intelligence <span className="text-white/60">Feed</span></h3>
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mt-1">Real-time status updates</p>
               </div>
               <button 
                 onClick={onClose}
-                className="w-10 h-10 glass rounded-full flex items-center justify-center hover:bg-[#CCFF00] hover:text-black transition-all text-white border border-white/20"
+                className="w-10 h-10 glass rounded-full flex items-center justify-center hover:bg-[#B5F55A] hover:text-black transition-all text-white border border-white/20"
               >
                 <X size={20} />
               </button>
@@ -152,15 +152,15 @@ export default function NotificationDrawer({ isOpen, onClose }: NotificationDraw
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className={`p-5 rounded-3xl border transition-all cursor-pointer relative group ${
-                      n.read ? 'bg-white/[0.02] border-white/5' : 'bg-[#CCFF00]/5 border-[#CCFF00]/30 shadow-[0_0_20px_rgba(204,255,0,0.05)]'
+                      n.read ? 'bg-white/[0.02] border-white/5' : 'bg-[#B5F55A]/5 border-[#B5F55A]/30 shadow-[0_0_20px_rgba(181,245,90,0.05)]'
                     }`}
                     onClick={() => markAsRead(n.id)}
                   >
                     {!n.read && (
-                      <span className="absolute top-4 right-4 w-2 h-2 bg-[#CCFF00] rounded-full shadow-[0_0_10px_rgba(204,255,0,0.8)]" />
+                      <span className="absolute top-4 right-4 w-2 h-2 bg-[#B5F55A] rounded-full shadow-[0_0_10px_rgba(181,245,90,0.8)]" />
                     )}
                     <div className="flex gap-4">
-                      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 ${n.read ? 'bg-white/5 text-slate-500' : 'bg-[#CCFF00]/20 text-[#CCFF00]'}`}>
+                      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 ${n.read ? 'bg-white/5 text-slate-500' : 'bg-[#B5F55A]/20 text-[#B5F55A]'}`}>
                         {getIcon(n.type)}
                       </div>
                       <div className="space-y-1">
@@ -181,7 +181,7 @@ export default function NotificationDrawer({ isOpen, onClose }: NotificationDraw
             </div>
 
             <div className="p-8 border-t border-white/10 bg-white/[0.02]">
-              <div className="flex items-center gap-3 text-[#CCFF00]/40">
+              <div className="flex items-center gap-3 text-[#B5F55A]/40">
                 <Clock size={14} />
                 <p className="text-[9px] font-black uppercase tracking-[0.2em]">Live Protocol Active</p>
               </div>

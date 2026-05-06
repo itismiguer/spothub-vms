@@ -1,6 +1,6 @@
 export const BRAND = {
-  PRIMARY_LIME: '#CCFF00',
-  BG_BLACK: '#0A0A0A',
+  PRIMARY_LIME: '#B5F55A',
+  BG_BLACK: '#0F0F0F',
   CHARCOAL: '#1A1A1A',
   WHITE: '#FFFFFF',
 };

@@ -1,21 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { User, Session } from '@supabase/supabase-js';
-
-export type UserRole = 'PLAYER' | 'OWNER' | 'ADMIN' | 'STAFF';
-
-interface UserProfile {
-  id: string;
-  email: string;
-  name: string;
-  role: UserRole;
-  facility_id?: string;
-  business_name?: string;
-  business_address?: string;
-  verification_doc_url?: string;
-  verification_status?: 'pending' | 'verified' | 'rejected';
-  created_at: string;
-}
+import { UserProfile, UserRole } from '../types';
+export type { UserProfile, UserRole };
 
 interface AuthContextType {
   user: User | null;
@@ -26,6 +13,7 @@ interface AuthContextType {
   loginWithEmail: (email: string, pass: string) => Promise<void>;
   registerWithEmail: (email: string, pass: string, name: string, role: UserRole, extra?: Partial<UserProfile>) => Promise<void>;
   logout: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -34,6 +22,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const refreshProfile = async () => {
+    if (user) {
+      await fetchProfile(user.id, user.user_metadata);
+    }
+  };
 
   useEffect(() => {
     // Get initial session
@@ -71,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = async (userId: string, userMetadata?: any) => {
     try {
+      // 1. Initial attempt to get profile
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -83,33 +78,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const userName = userMetadata?.full_name || userMetadata?.name || '';
           const userEmail = userMetadata?.email || '';
           
+          // CRITICAL: Default to UNASSIGNED if no role was pre-selected or in metadata
+          const roleFromMetadata = userMetadata?.role as string | undefined;
+          const finalRole = (roleFromMetadata ? roleFromMetadata.toUpperCase() : 'UNASSIGNED') as UserRole;
+
           const newProfile: any = {
             id: userId,
             email: userEmail,
             name: userName || userEmail.split('@')[0] || 'Athlete',
-            role: (userMetadata?.role as UserRole) || 'PLAYER',
+            role: finalRole,
             created_at: new Date().toISOString()
           };
 
-          const { error: insertError } = await supabase
+          // Try to upsert
+          const { data: upsertedData, error: insertError } = await supabase
             .from('profiles')
-            .upsert(newProfile, { onConflict: 'id' });
+            .upsert(newProfile, { onConflict: 'id' })
+            .select('*')
+            .single();
 
           if (insertError) {
             console.error('Error creating auto-profile:', insertError);
             // Fallback: set local profile so UI doesn't break
             setProfile(newProfile as UserProfile);
           } else {
-            setProfile(newProfile as UserProfile);
+            setProfile((upsertedData || newProfile) as UserProfile);
           }
         } else {
           console.error('Error fetching profile:', error);
+          // Fallback construction from metadata if fetch fails
+          if (userId) {
+            const fallback: any = {
+              id: userId,
+              email: userMetadata?.email || '',
+              name: userMetadata?.full_name || userMetadata?.name || 'Athlete',
+              role: ((userMetadata?.role || 'UNASSIGNED') as string).toUpperCase() as UserRole,
+              created_at: new Date().toISOString()
+            };
+            setProfile(fallback as UserProfile);
+          }
         }
       } else {
-        setProfile(data as UserProfile);
+        const normalizedData = {
+          ...data,
+          role: (data.role ? (data.role as string).toUpperCase() : 'UNASSIGNED') as UserRole
+        };
+        setProfile(normalizedData as UserProfile);
       }
     } catch (err) {
-      console.error('Error in fetchProfile:', err);
+      console.error('Catch error in fetchProfile:', err);
     } finally {
       setLoading(false);
     }
@@ -119,10 +136,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (role) {
       localStorage.setItem('pending_role', role);
     }
+    const redirectTo = window.location.origin;
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: 'https://builtbymiguel.net'
+        redirectTo
       }
     });
   };
@@ -131,10 +149,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (role) {
       localStorage.setItem('pending_role', role);
     }
+    const redirectTo = window.location.origin;
     await supabase.auth.signInWithOAuth({
       provider: 'apple',
       options: {
-        redirectTo: 'https://builtbymiguel.net'
+        redirectTo
       }
     });
   };
@@ -179,7 +198,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, login, loginWithApple, loginWithEmail, registerWithEmail, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, login, loginWithApple, loginWithEmail, registerWithEmail, logout, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
